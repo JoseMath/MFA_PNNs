@@ -448,7 +448,7 @@ isUnimodalHiddenLayers {2,3,4,5,4,1}
 results = runUniformSearch(2,1,2,2,4,2)
 printCounterexampleCandidates results3
 
-QD = {2, 4, 3, 4, 1}
+QD = {2, 4, 3, 4, 1} 
 netList last queryExample (QD,2)
 isUnimodalArchitecture(QD)
 
@@ -461,5 +461,17 @@ searchArchitectures ({{2,3,3,2,1}}, 2)
 
 for i from 3 to 30 list searchArchitectures ({{2,3,2,i,1}}, 2)
 
-out = runFrontierSearch(5, 2, 1, 2, 4, 2, 100, 12345)
+startTime = currentTime()
+out = runFrontierSearch(6, 2, 1, 2, 5, 2, 100000, 12345)
 printFrontierFillingResults out
+endTime = currentTime()
+print(endTime-startTime|" seconds")
+
+startTime = currentTime()
+out = runFrontierSearch(7, 2, 1, 2, 7, 2, 1000, 12345)
+printFrontierFillingResults out
+endTime = currentTime()
+print(endTime-startTime|" seconds")
+
+load"/Users/joserodriguez/Documents/GitHub/MFA_PNNs/step4_dual_ideal_example.m2"
+demoDualBookkeeping()
