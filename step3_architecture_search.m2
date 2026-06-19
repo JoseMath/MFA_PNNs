@@ -468,7 +468,7 @@ endTime = currentTime()
 print(endTime-startTime|" seconds")
 
 startTime = currentTime()
-out = runFrontierSearch(7, 2, 1, 2, 7, 2, 1000, 12345)
+out = runFrontierSearch(7, 2, 1, 2, 7, 2, 10000, 12345)
 printFrontierFillingResults out
 endTime = currentTime()
 print(endTime-startTime|" seconds")
