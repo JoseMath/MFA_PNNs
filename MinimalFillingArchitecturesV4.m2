@@ -15,19 +15,14 @@ newPackage(
 )
 
 export {
-    "frontierRegionTypeThreeHidden",
-    "writeCombinedFrontierStaircaseTikzThreeHidden",
-    "writeCombinedFrontierStaircaseStandaloneTexThreeHidden",
---
---
-    "writeFrontierStaircaseTikzTwoHidden",
-    "writeFrontierStaircaseStandaloneTexTwoHidden",
-    "frontierColorTypeTwoHidden",
     --
-    "writeCombinedFrontierStaircaseTikzTwoHidden",
-    "writeCombinedFrontierStaircaseStandaloneTexTwoHidden",
-    "frontierRegionTypeTwoHidden",
-    -- --
+    "upperShellTuples",
+    "unresolvedUpperShellTuples",
+    "unresolvedUpperShellTuplesInState",
+    "orthantCellsFromUpperShell",
+    "orthantCellsFromUpperShellInState",
+    "printOrthantCellsFromUpperShell",
+    --
     "allHiddenTuplesInBox",
     "unresolvedTuples",
     "unresolvedTuplesInState",
@@ -60,404 +55,158 @@ export {
 }
 
 
+---Remaining to explore
 ------------------------------------------------------------
--- 3D combined staircase diagram for the depth = 4 case
---
--- depth = 4  <=> hidden tuple length = 3
--- architectures have the form {d0, a1, a2, a3, dL}
---
--- Region colors:
---   blue   = implied filling only
---   red    = implied non-filling only
---   gray   = unresolved
---   purple = implied both (inconsistent frontier data)
+-- Upper-shell parameterization of unresolved regions
+-- outside the bounded box [m,n]^(depth-1)
 ------------------------------------------------------------
 
-frontierRegionTypeThreeHidden = (a, Fmin, Nmax) -> (
-    fillQ := impliedFilling(a, Fmin);
-    nonfillQ := impliedNonFilling(a, Nmax);
-
-    if fillQ and nonfillQ then return "both";
-    if fillQ then return "filling";
-    if nonfillQ then return "nonfilling";
-    "unresolved"
+-- All hidden tuples in the upper shell:
+-- at least one coordinate is equal to n
+upperShellTuples = (depth, m, n) -> (
+    k := depth - 1;
+    select(allTuples(k, rangeList(m, n)),
+        a -> any(#a, i -> a#i == n)
+    )
 );
 
-------------------------------------------------------------
--- Draw one unit cube in TikZ using 3 visible faces
--- Assumes a 3D coordinate system has been set in the tikzpicture.
-------------------------------------------------------------
-
-writeUnitCubeTikz = (f, x, y, z, faceColor) -> (
-    -- front face
-    f << "  \\fill[" << faceColor << "] (" << toString x << "," << toString y << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString y << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString z
-      << ") -- (" << toString x << "," << toString(y+1) << "," << toString z
-      << ") -- cycle;" << endl;
-
-    -- side face
-    f << "  \\fill[" << faceColor << "!85!black] (" << toString(x+1) << "," << toString y << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString(z+1)
-      << ") -- (" << toString(x+1) << "," << toString y << "," << toString(z+1)
-      << ") -- cycle;" << endl;
-
-    -- top face
-    f << "  \\fill[" << faceColor << "!60] (" << toString x << "," << toString(y+1) << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString(z+1)
-      << ") -- (" << toString x << "," << toString(y+1) << "," << toString(z+1)
-      << ") -- cycle;" << endl;
-
-    -- outline
-    f << "  \\draw[black!55] (" << toString x << "," << toString y << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString y << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString z
-      << ") -- (" << toString x << "," << toString(y+1) << "," << toString z
-      << ") -- cycle;" << endl;
-
-    f << "  \\draw[black!55] (" << toString(x+1) << "," << toString y << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString y << "," << toString(z+1) << ");" << endl;
-    f << "  \\draw[black!55] (" << toString(x+1) << "," << toString(y+1) << "," << toString z
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString(z+1) << ");" << endl;
-    f << "  \\draw[black!55] (" << toString x << "," << toString(y+1) << "," << toString z
-      << ") -- (" << toString x << "," << toString(y+1) << "," << toString(z+1) << ");" << endl;
-
-    f << "  \\draw[black!55] (" << toString(x+1) << "," << toString y << "," << toString(z+1)
-      << ") -- (" << toString(x+1) << "," << toString(y+1) << "," << toString(z+1)
-      << ") -- (" << toString x << "," << toString(y+1) << "," << toString(z+1) << ");" << endl;
+-- Upper-shell points not implied filling.
+-- These parameterize the outside orthant cells still unresolved
+-- with respect to the current filling frontier.
+unresolvedUpperShellTuples = (depth, m, n, Fmin) -> (
+    select(upperShellTuples(depth, m, n),
+        a -> not impliedFilling(a, Fmin)
+    )
 );
 
-------------------------------------------------------------
--- Combined 3D staircase TikZ writer
-------------------------------------------------------------
-
-writeCombinedFrontierStaircaseTikzThreeHidden = (state, filename) -> (
+unresolvedUpperShellTuplesInState = state -> (
     depth := state#"depth";
-    if depth =!= 4 then
-        error "writeCombinedFrontierStaircaseTikzThreeHidden: requires depth = 4 (three hidden layers)";
-
     m := (state#"range")#0;
     n := (state#"range")#1;
-
     Fmin := state#"FminTuples";
-    Nmax := state#"NmaxTuples";
 
-    f := openOut filename;
+    unresolvedUpperShellTuples(depth, m, n, Fmin)
+);
 
-    f << "\\begin{tikzpicture}[" << endl;
-    f << "  x={(1cm,0cm)}," << endl;
-    f << "  y={(0.72cm,0.36cm)}," << endl;
-    f << "  z={(0cm,0.95cm)}" << endl;
-    f << "]" << endl;
+------------------------------------------------------------
+-- Each shell point b determines one orthant cell outside the box:
+--
+--   E(b) = { a in Z_{>0}^k :
+--            a_i = b_i if b_i < n,
+--            a_i >= n  if b_i = n }
+--
+-- We encode that as:
+--   "fixedPositions" : list of coordinate indices where b_i < n
+--   "fixedValues"    : corresponding fixed values
+--   "freePositions"  : list of coordinate indices where b_i = n
+--   "anchor"         : the shell point b
+------------------------------------------------------------
 
-    f << "  % Combined 3D staircase diagram" << endl;
+orthantCellFromShellPoint = (b, n) -> (
+    fixedPos := {};
+    fixedVals := {};
+    freePos := {};
 
-    -- draw cubes back-to-front for better visibility
-    -- draw cubes back-to-front for better visibility
-    for z from m to n do (
-	scan(reverse toList(m .. n), y -> (
-		for x from m to n do (
-		    a := {x,y,z};
-		    t := frontierRegionTypeThreeHidden(a, Fmin, Nmax);
-		    baseColor :=
-		    if t === "filling" then "blue"
-		    else if t === "nonfilling" then "red"
-		    else if t === "both" then "purple"
-		    else "gray";
-		    writeUnitCubeTikz(f, x-m, y-m, z-m, baseColor);
-		    );
-		));
-	);
-    size := n - m + 1;
-
-    -- outer wireframe box
-    f << "  % Bounding box" << endl;
-    f << "  \\draw[black, thick] (0,0,0) -- (" << toString size << ",0,0) -- ("
-      << toString size << "," << toString size << ",0) -- (0," << toString size << ",0) -- cycle;" << endl;
-    f << "  \\draw[black, thick] (0,0," << toString size << ") -- (" << toString size << ",0," << toString size
-      << ") -- (" << toString size << "," << toString size << "," << toString size
-      << ") -- (0," << toString size << "," << toString size << ") -- cycle;" << endl;
-    f << "  \\draw[black, thick] (0,0,0) -- (0,0," << toString size << ");" << endl;
-    f << "  \\draw[black, thick] (" << toString size << ",0,0) -- (" << toString size << ",0," << toString size << ");" << endl;
-    f << "  \\draw[black, thick] (" << toString size << "," << toString size << ",0) -- (" << toString size << "," << toString size << "," << toString size << ");" << endl;
-    f << "  \\draw[black, thick] (0," << toString size << ",0) -- (0," << toString size << "," << toString size << ");" << endl;
-
-    -- mark Fmin points
-    scan(Fmin, a -> (
-        x := a#0 - m + 0.5;
-        y := a#1 - m + 0.5;
-        z := a#2 - m + 0.5;
-        f << "  \\filldraw[blue!85!black] (" << toString x << "," << toString y << "," << toString z
-          << ") circle (2.0pt);" << endl;
-    ));
-
-    -- mark Nmax points
-    scan(Nmax, a -> (
-        x := a#0 - m + 0.5;
-        y := a#1 - m + 0.5;
-        z := a#2 - m + 0.5;
-        f << "  \\draw[red!85!black, fill=red!85!black] (" << toString(x-0.08) << "," << toString(y-0.08) << "," << toString z
-          << ") rectangle (" << toString(x+0.08) << "," << toString(y+0.08) << "," << toString z << ");" << endl;
-    ));
-
-    -- title and axis labels
-    f << "  \\node at (" << toString(size/2) << "," << toString(size+1.5) << "," << toString(size+0.8)
-      << ") {Combined staircase diagram for depth $=4$};" << endl;
-
-    f << "  \\node at (" << toString(size/2) << ",-1.0,0) {$a_1$};" << endl;
-    f << "  \\node at (" << toString(size+0.9) << "," << toString(size/2) << ",0) {$a_2$};" << endl;
-    f << "  \\node at (0," << toString(size+0.1) << "," << toString(size/2) << ") {$a_3$};" << endl;
-
-    -- tick labels
-    for t from 0 to size-1 do (
-        label := t + m;
-        f << "  \\node[below] at (" << toString(t+0.5) << ",0,0) {" << toString label << "};" << endl;
-        f << "  \\node[right] at (" << toString size << "," << toString(t+0.5) << ",0) {" << toString label << "};" << endl;
-        f << "  \\node[left] at (0," << toString size << "," << toString(t+0.5) << ") {" << toString label << "};" << endl;
+    for i from 0 to #b - 1 do (
+        if b#i == n then (
+            freePos = join(freePos, {i});
+        ) else (
+            fixedPos = join(fixedPos, {i});
+            fixedVals = join(fixedVals, {b#i});
+        );
     );
 
-    -- legend
-    f << "  % Legend" << endl;
-    f << "  \\begin{scope}[shift={(" << toString(size+2.3) << ",0,0)}]" << endl;
-    f << "    \\fill[blue!25] (0,0,0) rectangle +(0.5,0.35);" << endl;
-    f << "    \\node[right] at (0.6,0.175,0) {implied filling};" << endl;
+    hashTable {
+        "anchor" => b,
+        "fixedPositions" => fixedPos,
+        "fixedValues" => fixedVals,
+        "freePositions" => freePos
+    }
+);
 
-    f << "    \\fill[red!25] (0,-0.8,0) rectangle +(0.5,0.35);" << endl;
-    f << "    \\node[right] at (0.6,-0.625,0) {implied non-filling};" << endl;
+orthantCellsFromUpperShell = (depth, m, n, Fmin) -> (
+    apply(unresolvedUpperShellTuples(depth, m, n, Fmin),
+        b -> orthantCellFromShellPoint(b, n)
+    )
+);
 
-    f << "    \\fill[gray!15] (0,-1.6,0) rectangle +(0.5,0.35);" << endl;
-    f << "    \\node[right] at (0.6,-1.425,0) {unresolved};" << endl;
+orthantCellsFromUpperShellInState = state -> (
+    depth := state#"depth";
+    m := (state#"range")#0;
+    n := (state#"range")#1;
+    Fmin := state#"FminTuples";
 
-    f << "    \\fill[purple!30] (0,-2.4,0) rectangle +(0.5,0.35);" << endl;
-    f << "    \\node[right] at (0.6,-2.225,0) {implied both};" << endl;
-
-    f << "    \\filldraw[blue!85!black] (0.25,-3.2,0) circle (2.0pt);" << endl;
-    f << "    \\node[right] at (0.6,-3.2,0) {$F_{\\min}$ point};" << endl;
-
-    f << "    \\draw[red!85!black, fill=red!85!black] (0.17,-4.08,0) rectangle (0.33,-3.92,0);" << endl;
-    f << "    \\node[right] at (0.6,-4.0,0) {$N_{\\max}$ point};" << endl;
-
-    f << "  \\end{scope}" << endl;
-
-    f << "\\end{tikzpicture}" << endl;
-    close f;
-
-    filename
+    orthantCellsFromUpperShell(depth, m, n, Fmin)
 );
 
 ------------------------------------------------------------
--- Standalone LaTeX wrapper
+-- Pretty printer
 ------------------------------------------------------------
 
-writeCombinedFrontierStaircaseStandaloneTexThreeHidden = (state, filename) -> (
-    bodyName := filename | ".tikzbody";
-    writeCombinedFrontierStaircaseTikzThreeHidden(state, bodyName);
+printOrthantCellsFromUpperShell = state -> (
+    cells := orthantCellsFromUpperShellInState(state);
+    n := (state#"range")#1;
 
-    bodyText := get bodyName;
-    f := openOut filename;
+    << "Outside-box unresolved orthant cells (parameterized by upper shell):" << endl;
+    << "  number of cells = " << toString(#cells) << endl;
+    << endl;
 
-    f << "\\documentclass[tikz,border=5pt]{standalone}" << endl;
-    f << "\\usepackage{tikz}" << endl;
-    f << "\\begin{document}" << endl;
+    scan(cells, cell -> (
+	    << "  anchor = " << toString(cell#"anchor")
+           << ", free positions (>= " << toString(n) << ") = " << toString(cell#"freePositions")
+           << ", fixed positions = " << toString(cell#"fixedPositions")
+           << ", fixed values = " << toString(cell#"fixedValues")
+           << endl;
+    ));
+)
 
-    scan(lines bodyText, s -> f << s << endl);
 
-    f << "\\end{document}" << endl;
-    close f;
 
-    filename
+
+---Dimension cache
+------------------------------------------------------------
+-- Safe architecture key builder
+------------------------------------------------------------
+
+archKey = arch -> (
+    if class arch =!= List then
+        error("archKey: expected a List architecture, got class " | toString class arch);
+
+    out := "{";
+    for i from 0 to #arch - 1 do (
+        out = out | toString(arch#i);
+        if i < #arch - 1 then out = out | ",";
+    );
+    out | "}"
 );
 
+
+
+hasDimensionCached = (state, arch) -> (
+    myCache := state#"DimensionCache";
+    myCache#? archKey arch
+);
+
+getDimensionCached = (state, arch) -> (
+    if class arch =!= List then
+        error("getDimensionCached: expected architecture as List, got class " | toString class arch);
+
+    key := archKey arch;
+    cache := state#"DimensionCache";
+
+    if cache#? key then (
+        if state#? "nCacheHits" then
+            state#"nCacheHits" = state#"nCacheHits" + 1;
+        cache#key
+    ) else (
+        if state#? "nCacheMisses" then
+            state#"nCacheMisses" = state#"nCacheMisses" + 1;
+        res := computeDimension(arch, state#"exponent");
+        cache#key = res;
+        res
+    )
+);
 ---
-
-------------------------------------------------------------
--- TikZ staircase diagrams for the two-hidden-layer case
---
--- Convention:
---   depth = 3  <=> hidden tuple length = 2
---   architectures have form {d0, a1, a2, dL}
---
--- The diagram is drawn in the (a1,a2)-plane over the box [m,n]^2.
---
--- We produce two side-by-side staircase plots:
---   left  = filling staircase determined by Fmin
---   right = non-filling staircase determined by Nmax
---
--- Cells are colored as:
---   filling    : blue
---   non-filling: red
---   unresolved : gray
-------------------------------------------------------------
-
-frontierColorTypeTwoHidden = (a, Fmin, Nmax) -> (
-    if impliedFilling(a, Fmin) then return "filling";
-    if impliedNonFilling(a, Nmax) then return "nonfilling";
-    "unresolved"
-);
-
-writeFrontierStaircaseTikzTwoHidden = (state, filename) -> (
-    depth := state#"depth";
-    if depth =!= 3 then
-        error "writeFrontierStaircaseTikzTwoHidden: requires depth = 3 (two hidden layers)";
-
-    m := (state#"range")#0;
-    n := (state#"range")#1;
-
-    Fmin := state#"FminTuples";
-    Nmax := state#"NmaxTuples";
-
-    f := openOut filename;
-
-    -- Header for a bare tikzpicture (not full LaTeX document)
-    f << "\\begin{tikzpicture}[scale=0.9]" << endl;
-    f << "  % Left panel: filling staircase (Fmin)" << endl;
-    f << "  \\begin{scope}[shift={(0,0)}]" << endl;
-
-    -- Fill cells for the left panel
-    for i from m to n do (
-        for j from m to n do (
-            a := {i,j};
-            t := frontierColorTypeTwoHidden(a, Fmin, Nmax);
-
-            if t === "filling" then (
-                f << "    \\fill[blue!25] (" << toString(i-1) << "," << toString(j-1)
-                  << ") rectangle (" << toString(i) << "," << toString(j) << ");" << endl;
-            ) else if t === "unresolved" then (
-                f << "    \\fill[gray!15] (" << toString(i-1) << "," << toString(j-1)
-                  << ") rectangle (" << toString(i) << "," << toString(j) << ");" << endl;
-            );
-        );
-    );
-
-    -- Grid and axes labels for left panel
-    f << "    \\draw[step=1cm,black!50] (" << toString(m-1) << "," << toString(m-1)
-      << ") grid (" << toString(n) << "," << toString(n) << ");" << endl;
-    f << "    \\node at (" << toString((m-1+n)/2) << "," << toString(n+0.8)
-      << ") {$F_{\\min}$ staircase};" << endl;
-    f << "    \\node at (" << toString((m-1+n)/2) << "," << toString(m-1-0.8)
-      << ") {$a_1$};" << endl;
-    f << "    \\node[rotate=90] at (" << toString(m-1-0.8) << "," << toString((m-1+n)/2)
-      << ") {$a_2$};" << endl;
-
-    -- Tick labels in original coordinates
-    for i from m to n do (
-        f << "    \\node[below] at (" << toString(i-0.5) << "," << toString(m-1)
-          << ") {" << toString i << "};" << endl;
-        f << "    \\node[left] at (" << toString(m-1) << "," << toString(i-0.5)
-          << ") {" << toString i << "};" << endl;
-    );
-
-    -- Mark Fmin points
-    scan(Fmin, a -> (
-        i := a#0;
-        j := a#1;
-        f << "    \\filldraw[blue!70!black] (" << toString(i-0.5) << "," << toString(j-0.5)
-          << ") circle (2.2pt);" << endl;
-    ));
-
-    f << "  \\end{scope}" << endl;
-    f << endl;
-
-    -- Right panel: non-filling staircase
-    shiftX := (n - m + 3); -- gap between the two panels
-
-    f << "  % Right panel: non-filling staircase (Nmax)" << endl;
-    f << "  \\begin{scope}[shift={(" << toString shiftX << ",0)}]" << endl;
-
-    for i from m to n do (
-        for j from m to n do (
-            a := {i,j};
-            t := frontierColorTypeTwoHidden(a, Fmin, Nmax);
-
-            if t === "nonfilling" then (
-                f << "    \\fill[red!25] (" << toString(i-1) << "," << toString(j-1)
-                  << ") rectangle (" << toString(i) << "," << toString(j) << ");" << endl;
-            ) else if t === "unresolved" then (
-                f << "    \\fill[gray!15] (" << toString(i-1) << "," << toString(j-1)
-                  << ") rectangle (" << toString(i) << "," << toString(j) << ");" << endl;
-            );
-        );
-    );
-
-    -- Grid and axes labels for right panel
-    f << "    \\draw[step=1cm,black!50] (" << toString(m-1) << "," << toString(m-1)
-      << ") grid (" << toString(n) << "," << toString(n) << ");" << endl;
-    f << "    \\node at (" << toString((m-1+n)/2) << "," << toString(n+0.8)
-      << ") {$N_{\\max}$ staircase};" << endl;
-    f << "    \\node at (" << toString((m-1+n)/2) << "," << toString(m-1-0.8)
-      << ") {$a_1$};" << endl;
-    f << "    \\node[rotate=90] at (" << toString(m-1-0.8) << "," << toString((m-1+n)/2)
-      << ") {$a_2$};" << endl;
-
-    for i from m to n do (
-        f << "    \\node[below] at (" << toString(i-0.5) << "," << toString(m-1)
-          << ") {" << toString i << "};" << endl;
-        f << "    \\node[left] at (" << toString(m-1) << "," << toString(i-0.5)
-          << ") {" << toString i << "};" << endl;
-    );
-
-    -- Mark Nmax points
-    scan(Nmax, a -> (
-        i := a#0;
-        j := a#1;
-        f << "    \\filldraw[red!70!black] (" << toString(i-0.5) << "," << toString(j-0.5)
-          << ") rectangle ++(0.12,0.12);" << endl;
-        -- More visible square marker:
-        f << "    \\draw[red!70!black, fill=red!70!black] (" << toString(i-0.5-0.09)
-          << "," << toString(j-0.5-0.09) << ") rectangle ("
-          << toString(i-0.5+0.09) << "," << toString(j-0.5+0.09) << ");" << endl;
-    ));
-
-    f << "  \\end{scope}" << endl;
-    f << endl;
-
-    -- Simple legend
-    legendX := shiftX/2;
-    f << "  % Legend" << endl;
-    f << "  \\begin{scope}[shift={(" << toString(legendX) << "," << toString(n+1.6) << ")}]" << endl;
-    f << "    \\fill[blue!25] (0,0) rectangle (0.5,0.35);" << endl;
-    f << "    \\node[right] at (0.6,0.175) {implied filling};" << endl;
-    f << "    \\fill[red!25] (3.0,0) rectangle (3.5,0.35);" << endl;
-    f << "    \\node[right] at (3.6,0.175) {implied non-filling};" << endl;
-    f << "    \\fill[gray!15] (6.7,0) rectangle (7.2,0.35);" << endl;
-    f << "    \\node[right] at (7.3,0.175) {unresolved};" << endl;
-    f << "  \\end{scope}" << endl;
-
-    f << "\\end{tikzpicture}" << endl;
-    close f;
-
-    filename
-);
-
-------------------------------------------------------------
--- Write a standalone LaTeX document containing the TikZ figure
-------------------------------------------------------------
-
-writeFrontierStaircaseStandaloneTexTwoHidden = (state, filename) -> (
-    f := openOut filename;
-    f << "\\documentclass[tikz,border=5pt]{standalone}" << endl;
-    f << "\\usepackage{tikz}" << endl;
-    f << "\\begin{document}" << endl;
-    close f;
-
-    -- append the tikzpicture body
-    tmpName := filename | ".tikzbody";
-    writeFrontierStaircaseTikzTwoHidden(state, tmpName);
-
-    body := get tmpName;
-    f2 := openOut filename;
-    f2 << "\\documentclass[tikz,border=5pt]{standalone}" << endl;
-    f2 << "\\usepackage{tikz}" << endl;
-    f2 << "\\begin{document}" << endl;
-    scan(lines body, s -> f2 << s << endl);
-    f2 << "\\end{document}" << endl;
-    close f2;
-
-    filename
-);
-
 
 
 ------------------------------------------------------------
@@ -516,8 +265,12 @@ makeFrontierState = (depth, d0, dL, m, n, r) -> (
         "nRandomProposals" => 0,
 
 	"exhausted" => false,
-	"unresolvedCount" => null
-    }
+	"unresolvedCount" => null,
+
+	"DimensionCache" => new MutableHashTable from {},
+	"nCacheHits" => 0,
+	"nCacheMisses" => 0
+	}
 );
 
 
@@ -958,7 +711,8 @@ computeDimension = (networkWidths, networkExponent) -> (
         ambientDim,
         exDim,
         dims#0,
-        exDim - dims#0
+        exDim - dims#0,
+	ambientDim - dims#0
     }
 );
 
@@ -1001,6 +755,7 @@ resultAmbientDim  = res -> res#2;
 resultExpectedDim = res -> res#3;
 resultDimension   = res -> res#4;
 resultDefect      = res -> res#5;
+resultCodim       = res -> res#6;
 isFillingResult   = res -> resultDefect(res) == 0;
 
 searchArchitectures = (archList, exponent) -> (
@@ -1011,7 +766,8 @@ searchArchitectures = (archList, exponent) -> (
            << " of " << toString total
            << ": " << toString arch << endl;
         res := computeDimension(arch, exponent);
-        << "  -> dim = " << toString(res#4)
+	--res := getDimensionCached(state, arch);
+	<< "  -> dim = " << toString(res#4)
            << ", defect = " << toString(res#5) << endl;
         res
     ))
@@ -1053,6 +809,7 @@ printResult = res -> (
        << ", expected = " << toString(resultExpectedDim res)
        << ", dim = " << toString(resultDimension res)
        << ", defect = " << toString(resultDefect res)
+       << ", codim = " << toString(resultCodim res)
        << endl;
 );
 
@@ -1399,8 +1156,9 @@ initializeFrontierWithArchitectures = (state, tuples) -> (
                 arch := architectureFromHidden(d0, dL, a);
                 << "Evaluating seeded architecture " << toString arch << endl;
 
-                res := computeDimension(arch, r);
-                nEvaluated = nEvaluated + 1;
+                --res := computeDimension(arch, r);
+		res := getDimensionCached(state, arch);
+		nEvaluated = nEvaluated + 1;
 
                 << "  -> dim = " << toString(resultDimension res)
                    << ", defect = " << toString(resultDefect res) << endl;
@@ -1515,7 +1273,8 @@ runFrontierSearchResume = (state, B, seed) -> (
             arch := architectureFromHidden(d0, dL, a);
             << "  evaluating architecture " << toString arch << endl;
 
-            res := computeDimension(arch, r);
+            --res := computeDimension(arch, r);
+	    res := getDimensionCached(state, arch);
             nEvaluated = nEvaluated + 1;
 
             << "  -> dim = " << toString(resultDimension res)
@@ -1649,7 +1408,8 @@ runGuidedFrontierSearchResume = (state, B, seed) -> (
             arch := architectureFromHidden(d0, dL, a);
             << "  evaluating architecture " << toString arch << endl;
 
-            res := computeDimension(arch, r);
+            --res := computeDimension(arch, r);
+	    res := getDimensionCached(state, arch);
             nEvaluated = nEvaluated + 1;
 
             << "  -> dim = " << toString(resultDimension res)
@@ -2149,13 +1909,14 @@ Resume iteration 73 / 10000: proposed hidden widths {5, 5, 5, 3, 5} (random-from
 
   ---
   lowerBound=2
-upperBound =7
+upperBound =3
 pnnDepth=7
 state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
 seedTuples = transpose for i to pnnDepth-2 list {}
 
 state1 = initializeFrontierWithArchitectures(state0, seedTuples)
-state2 = runGuidedFrontierSearchResume(state1, 10000, 12345)
+state2 = runGuidedFrontierSearchResume(state1, 10, 12345)
+
 state3 = runGuidedFrontierSearchResume(state2, 10000, 12345)
 
 
@@ -2178,3 +1939,24 @@ o25 = MutableHashTable{d0 => 2                                                  
 
 i26 : #{{3, 3, 4, 6, 5, 2}, {3, 4, 5, 6, 4, 2}, {3, 3, 5, 6, 4, 4}, {3, 4, 4, 5, 5, 4}, {3, 3, 5, 5, 5, 4}, {3, 4, 5, 5, 4, 4}, {3, 4, 6, 5, 4, 3}, {3, 4, 5, 5, 5, 2}, {3, 5, 5, 5, 4, 3}, {3, 3, 6, 6, 4, 3}, {3, 3, 5, 7, 4, 2}, {3, 3, 4, 5, 6, 3}, {3, 4, 5, 4, 6, 4}}
 
+restart
+load"/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV4.m2"
+state0 = makeFrontierState(3,2,1,2,4,2)
+state1 = initializeFrontierWithArchitectures(state0, {{2,2},{3,3}})
+state2 = runGuidedFrontierSearchResume(state1, 10, 12345)
+printResult last first pairs state2#"DimensionCache"
+
+
+
+  lowerBound=2
+upperBound =4
+pnnDepth=4
+state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
+seedTuples = transpose for i to pnnDepth-2 list {}
+
+state1 = initializeFrontierWithArchitectures(state0, seedTuples)
+state2 = runGuidedFrontierSearchResume(state1, 10, 12345)
+
+unresolvedUpperShellTuplesInState(state2)
+orthantCellsFromUpperShellInState(state2);
+printOrthantCellsFromUpperShell(state2)
