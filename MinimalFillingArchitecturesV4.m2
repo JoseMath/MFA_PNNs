@@ -16,6 +16,21 @@ newPackage(
 
 export {
     --
+    "certifyAllUpperShellOrthantCellsByBlocks",
+    "printUpperShellBlockCertificationSummary",
+    --
+    "prefixArchitecture",
+    "suffixArchitecture",
+    "anchorArchitectureFromHidden",
+    "fixedHiddenPositionsFromAnchor",
+    "recursiveCutsFromAnchor",
+    "subArchitectureByIndices",
+    "ambientUpperBoundArchitecture",
+    "blockContainsFreeHidden",
+    "blockwiseRecursiveUpperBoundFromAnchor",
+    "orthantCellCertifiedNonfillingByBlocks",
+    "printBlockwiseRecursiveCertificate",
+    --
     "upperShellTuples",
     "unresolvedUpperShellTuples",
     "unresolvedUpperShellTuplesInState",
@@ -54,6 +69,241 @@ export {
     "printGuidedFrontierSummary", "printGuidedFrontierFillingResults"
 }
 
+
+------------------------------------------------------------
+-- Recursive upper bounds for orthant cells
+--
+-- Interpretation:
+--   anchor = hidden tuple in the upper shell
+--   anchor_i < n   => that hidden coordinate is fixed
+--   anchor_i = n   => that hidden coordinate is free upward
+--
+-- We split the full architecture at fixed hidden coordinates and use:
+--   - exact dimension on fully fixed blocks
+--   - ambient dimension on blocks containing a free coordinate
+------------------------------------------------------------
+
+------------------------------------------------------------
+-- Basic architecture slicing helpers
+------------------------------------------------------------
+
+-- prefixArchitecture(arch, k)
+-- returns {d0,...,dk}
+prefixArchitecture = (arch, k) -> (
+    if k < 0 or k > #arch - 1 then
+        error "prefixArchitecture: split index out of range";
+    arch_(toList(0 .. k))
+);
+
+-- suffixArchitecture(arch, k)
+-- returns {dk,...,dL}
+suffixArchitecture = (arch, k) -> (
+    if k < 0 or k > #arch - 1 then
+        error "suffixArchitecture: split index out of range";
+    arch_(toList(k .. #arch - 1))
+);
+
+-- turn a hidden tuple into a full architecture
+anchorArchitectureFromHidden = (d0, dL, anchor) -> (
+    architectureFromHidden(d0, dL, anchor)
+);
+
+------------------------------------------------------------
+-- Identify fixed hidden positions
+--
+-- anchor has length k = depth-1
+-- hidden coordinates in the full architecture are at indices 1..k
+------------------------------------------------------------
+
+fixedHiddenPositionsFromAnchor = (anchor, n) -> (
+    select(toList(0 .. #anchor - 1), i -> anchor#i < n)
+);
+
+------------------------------------------------------------
+-- Cut positions for recursive splitting
+--
+-- Full architecture indices:
+--   0          = input d0
+--   1..k       = hidden widths
+--   k+1        = output dL
+--
+-- We always include:
+--   0 and k+1
+-- and we include i+1 whenever anchor_i is fixed (< n)
+------------------------------------------------------------
+
+recursiveCutsFromAnchor = (anchor, n) -> (
+    hiddenFixed := fixedHiddenPositionsFromAnchor(anchor, n);
+    sort unique join({0, #anchor + 1}, apply(hiddenFixed, i -> i + 1))
+);
+
+------------------------------------------------------------
+-- Extract a contiguous subarchitecture arch[i..j]
+------------------------------------------------------------
+
+subArchitectureByIndices = (arch, i, j) -> (
+    if i < 0 or j > #arch - 1 or i > j then
+        error "subArchitectureByIndices: invalid indices";
+    arch_(toList(i .. j))
+);
+
+------------------------------------------------------------
+-- Ambient dimension for a block architecture
+--
+-- If block = {e0,...,et}, then degree = r^(t-1)
+-- ambient dim = (# degree-r monomials in e0 vars) * output dimension
+------------------------------------------------------------
+
+ambientUpperBoundArchitecture = (arch, r) -> (
+    degree := r^(#arch - 2);
+    binomial(degree + arch#0 - 1, arch#0 - 1) * arch#(#arch - 1)
+);
+
+------------------------------------------------------------
+-- Does a block [i..j] contain any free hidden coordinate?
+--
+-- full hidden positions are 1..#anchor in full architecture indexing
+-- anchor positions are 0..#anchor-1
+------------------------------------------------------------
+
+blockContainsFreeHidden = (anchor, n, i, j) -> (
+    freeQ := false;
+
+    -- the hidden coordinates contributing to this block are the full
+    -- architecture indices 1..#anchor, intersected with [i..j]
+    left := max(1, i);
+    right := min(#anchor, j);
+
+    if left <= right then (
+        for t from left to right do (
+            if anchor#(t - 1) == n then freeQ = true;
+        );
+    );
+
+    freeQ
+);
+
+------------------------------------------------------------
+-- Main certificate: blockwise recursive upper bound from an anchor
+------------------------------------------------------------
+
+blockwiseRecursiveUpperBoundFromAnchor = (state, anchor) -> (
+    d0 := state#"d0";
+    dL := state#"dL";
+    n := (state#"range")#1;
+    r := state#"exponent";
+
+    arch := anchorArchitectureFromHidden(d0, dL, anchor);
+    cuts := recursiveCutsFromAnchor(anchor, n);
+
+    blockInfos := {};
+    upperSum := 0;
+
+    -- Build blocks between consecutive cut indices
+    for s from 0 to #cuts - 2 do (
+        i := cuts#s;
+        j := cuts#(s + 1);
+
+        block := subArchitectureByIndices(arch, i, j);
+        hasFree := blockContainsFreeHidden(anchor, n, i, j);
+
+        if hasFree then (
+            ub := ambientUpperBoundArchitecture(block, r);
+            blockType := "ambient-upper-bound";
+        ) else (
+            res := getDimensionCached(state, block);
+            ub = resultDimension res;
+            blockType = "exact-dimension";
+        );
+
+        upperSum = upperSum + ub;
+
+        blockInfos = join(blockInfos, {
+            hashTable {
+                "startIndex" => i,
+                "endIndex" => j,
+                "blockArchitecture" => block,
+                "blockType" => blockType,
+                "blockUpperBound" => ub
+            }
+        });
+    );
+
+    -- overlap correction from recursive lemma:
+    -- subtract d_(cut index) at internal cuts
+    overlapCorrection := 0;
+    if #cuts > 2 then (
+        for s from 1 to #cuts - 2 do (
+            overlapCorrection = overlapCorrection + arch#(cuts#s);
+        );
+    );
+
+    ubTotal := upperSum - overlapCorrection;
+
+    -- Evaluate anchor architecture itself (cached)
+    fullRes := getDimensionCached(state, arch);
+
+    expected := resultExpectedDim fullRes;
+    actual := resultDimension fullRes;
+    ambient := resultAmbientDim fullRes;
+    defect := resultDefect fullRes;
+    codim := resultCodim fullRes;
+
+    hashTable {
+        "anchor" => anchor,
+        "architecture" => arch,
+        "cuts" => cuts,
+        "blockInfos" => blockInfos,
+        "sumBlockBounds" => upperSum,
+        "overlapCorrection" => overlapCorrection,
+        "upperBound" => ubTotal,
+        "ambientDim" => ambient,
+        "expectedDimAtAnchor" => expected,
+        "actualDimAtAnchor" => actual,
+        "defectAtAnchor" => defect,
+        "codimAtAnchor" => codim,
+        "certifiedNonfillingOrthantCell" => (ubTotal < expected)
+    }
+);
+
+------------------------------------------------------------
+-- Boolean wrapper
+------------------------------------------------------------
+
+orthantCellCertifiedNonfillingByBlocks = (state, anchor) -> (
+    info := blockwiseRecursiveUpperBoundFromAnchor(state, anchor);
+    info#"certifiedNonfillingOrthantCell"
+);
+
+------------------------------------------------------------
+-- Pretty-printer
+------------------------------------------------------------
+
+printBlockwiseRecursiveCertificate = info -> (
+    << "Blockwise recursive certificate" << endl;
+    << "  anchor hidden tuple = " << toString(info#"anchor") << endl;
+    << "  full architecture = " << toString(info#"architecture") << endl;
+    << "  cuts = " << toString(info#"cuts") << endl;
+    << "  sum of block bounds = " << toString(info#"sumBlockBounds") << endl;
+    << "  overlap correction = " << toString(info#"overlapCorrection") << endl;
+    << "  total recursive upper bound = " << toString(info#"upperBound") << endl;
+    << "  expected dim at anchor = " << toString(info#"expectedDimAtAnchor") << endl;
+    << "  actual dim at anchor = " << toString(info#"actualDimAtAnchor") << endl;
+    << "  defect at anchor = " << toString(info#"defectAtAnchor")
+       << ", codim at anchor = " << toString(info#"codimAtAnchor") << endl;
+    << "  certified nonfilling for entire orthant cell? "
+       << toString(info#"certifiedNonfillingOrthantCell") << endl;
+    << endl;
+
+    << "Blocks:" << endl;
+    scan(info#"blockInfos", b -> (
+        << "  [" << toString(b#"startIndex") << "," << toString(b#"endIndex") << "] "
+           << toString(b#"blockArchitecture")
+           << "  type = " << toString(b#"blockType")
+           << "  bound = " << toString(b#"blockUpperBound")
+           << endl;
+    ));
+);
 
 ---Remaining to explore
 ------------------------------------------------------------
@@ -1453,6 +1703,67 @@ runGuidedFrontierSearchResume = (state, B, seed) -> (
     state
 );
 
+
+
+------------------------------------------------------------
+-- Certify all unresolved upper-shell orthant cells
+-- using the blockwise recursive upper-bound method
+------------------------------------------------------------
+
+certifyAllUpperShellOrthantCellsByBlocks = state -> (
+    anchors := unresolvedUpperShellTuplesInState(state);
+
+    infos := apply(anchors, a -> blockwiseRecursiveUpperBoundFromAnchor(state, a));
+
+    certified := select(infos, info -> info#"certifiedNonfillingOrthantCell");
+    uncertified := select(infos, info -> not info#"certifiedNonfillingOrthantCell");
+
+    hashTable {
+        "anchors" => anchors,
+        "numAnchors" => #anchors,
+        "infoList" => infos,
+        "certifiedList" => certified,
+        "uncertifiedList" => uncertified,
+        "numCertified" => #certified,
+        "numUncertified" => #uncertified,
+        "allCertified" => (#uncertified == 0)
+    }
+);
+
+------------------------------------------------------------
+-- Pretty printer for upper-shell block certification
+------------------------------------------------------------
+
+printUpperShellBlockCertificationSummary = cert -> (
+    << "Upper-shell orthant cell certification summary" << endl;
+    << "  number of unresolved upper-shell anchors = " << toString(cert#"numAnchors") << endl;
+    << "  certified nonfilling orthant cells = " << toString(cert#"numCertified") << endl;
+    << "  uncertified orthant cells = " << toString(cert#"numUncertified") << endl;
+    << "  all unresolved upper-shell cells certified nonfilling? "
+       << toString(cert#"allCertified") << endl;
+    << endl;
+
+    if cert#"numCertified" > 0 then (
+        << "Certified anchors:" << endl;
+        scan(cert#"certifiedList", info -> (
+            << "  " << toString(info#"anchor")
+               << "  with upper bound " << toString(info#"upperBound")
+               << " < expected " << toString(info#"expectedDimAtAnchor")
+               << endl;
+        ));
+        << endl;
+    );
+
+    if cert#"numUncertified" > 0 then (
+        << "Uncertified anchors:" << endl;
+        scan(cert#"uncertifiedList", info -> (
+            << "  " << toString(info#"anchor")
+               << "  with upper bound " << toString(info#"upperBound")
+               << ", expected " << toString(info#"expectedDimAtAnchor")
+               << endl;
+        ));
+    );
+);
 end
 restart
 load"/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV4.m2"
@@ -1946,9 +2257,7 @@ state1 = initializeFrontierWithArchitectures(state0, {{2,2},{3,3}})
 state2 = runGuidedFrontierSearchResume(state1, 10, 12345)
 printResult last first pairs state2#"DimensionCache"
 
-
-
-  lowerBound=2
+lowerBound=2
 upperBound =4
 pnnDepth=4
 state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
@@ -1956,7 +2265,37 @@ seedTuples = transpose for i to pnnDepth-2 list {}
 
 state1 = initializeFrontierWithArchitectures(state0, seedTuples)
 state2 = runGuidedFrontierSearchResume(state1, 10, 12345)
+seedTuples = transpose for i to pnnDepth-2 list {}
 
 unresolvedUpperShellTuplesInState(state2)
 orthantCellsFromUpperShellInState(state2);
 printOrthantCellsFromUpperShell(state2)
+
+
+lowerBound=2
+upperBound =5
+pnnDepth=4
+seedTuples = transpose for i to pnnDepth-2 list {}
+state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
+state1 = initializeFrontierWithArchitectures(state0, seedTuples)
+state2 = runGuidedFrontierSearchResume(state1, 10, 12345)
+
+anchor = {3,5,5};
+inf = blockwiseRecursiveUpperBoundFromAnchor(state2, anchor)
+printBlockwiseRecursiveCertificate(inf)
+
+
+
+
+lowerBound=2
+upperBound =7
+pnnDepth=7
+seedTuples = transpose for i to pnnDepth-2 list {lowerBound,upperBound}
+seedTuples = transpose for i to pnnDepth-2 list {}
+state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
+state1 = initializeFrontierWithArchitectures(state0, seedTuples)
+state2 = runGuidedFrontierSearchResume(state1, 1000, 12345)
+
+unresolvedUpperShellTuplesInState(state2)
+cert = certifyAllUpperShellOrthantCellsByBlocks(state2);
+printUpperShellBlockCertificationSummary(cert);
