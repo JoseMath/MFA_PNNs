@@ -15,6 +15,17 @@ newPackage(
 )
 
 export {
+    "adjacentFixedPositions",
+    "canonicalCutsFromFreePositions",
+    "canonicalCutsFromRegion",
+    "testCanonicalCutsForRegion",
+    "testCanonicalCutsFromUpperShellAnchor",
+    "printCanonicalCutSummary",
+    --
+    "regionBlockUpperBoundFromCuts",
+    "certifyRegionNonfillingByCuts",
+    "printRegionBlockCertificate",
+    --
     "printPatternRegionCertificate",
     "freePositionsFromAnchor",
     "boundaryPointToAnchor",
@@ -81,6 +92,295 @@ export {
 }
 
 
+printCanonicalCutSummary = info -> (
+    << "Canonical cut summary" << endl;
+    << "  architecture = " << toString(info#"architecture") << endl;
+    << "  cuts = " << toString(info#"cuts") << endl;
+    << "  upper bound = " << toString(info#"upperBound") << endl;
+    << "  expected at minimal anchor = " << toString(info#"expectedDimAtMinimalAnchor") << endl;
+    << "  certified nonfilling region? " << toString(info#"certifiedNonfillingRegion") << endl;
+);
+
+
+------------------------------------------------------------
+-- Fixed positions adjacent to free positions
+------------------------------------------------------------
+fixedPositionsFromFreePositions = (k, freePositions) -> (
+    select(toList(0 .. k - 1), i -> not member(i, freePositions))
+);
+
+minimalAnchorFromUpperShellAnchor = (shellAnchor, m, n) -> (
+    apply(shellAnchor, x -> if x == n then n else m)
+);
+
+adjacentFixedPositions = (k, freePositions) -> (
+    fixedPositions := fixedPositionsFromFreePositions(k, freePositions);
+
+    select(fixedPositions, i ->
+        any(freePositions, j -> j == i - 1 or j == i + 1)
+    )
+);
+
+------------------------------------------------------------
+-- Canonical cut set determined by free positions
+--
+-- Hidden positions are 0..k-1
+-- Full architecture indices are:
+--   0     = input
+--   1..k  = hidden coordinates
+--   k+1   = output
+--
+-- So a hidden cut at position i becomes full index i+1.
+------------------------------------------------------------
+
+canonicalCutsFromFreePositions = (k, freePositions) -> (
+    adjFixed := adjacentFixedPositions(k, freePositions);
+    sort unique join({0, k + 1}, apply(adjFixed, i -> i + 1))
+);
+
+------------------------------------------------------------
+-- Canonical cuts for a region described by
+--   anchorHidden, freePositions
+------------------------------------------------------------
+
+canonicalCutsFromRegion = (anchorHidden, freePositions) -> (
+    canonicalCutsFromFreePositions(#anchorHidden, freePositions)
+);
+
+
+------------------------------------------------------------
+-- Test the unique canonical cut set for a region
+------------------------------------------------------------
+
+testCanonicalCutsForRegion = (state, anchorHidden, freePositions) -> (
+    cuts := canonicalCutsFromRegion(anchorHidden, freePositions);
+    regionBlockUpperBoundFromCuts(state, anchorHidden, freePositions, cuts)
+);
+
+
+------------------------------------------------------------
+-- Convenience wrapper from an upper-shell anchor
+------------------------------------------------------------
+
+testCanonicalCutsFromUpperShellAnchor = (state, shellAnchor) -> (
+    m := (state#"range")#0;
+    n := (state#"range")#1;
+
+    freePositions := freePositionsFromAnchor(shellAnchor, n);
+    anchorHidden := minimalAnchorFromUpperShellAnchor(shellAnchor, m, n);
+
+    testCanonicalCutsForRegion(state, anchorHidden, freePositions)
+);
+
+
+
+
+
+------------------------------------------------------------
+-- Record exact block dimensions used in certification
+------------------------------------------------------------
+
+recordExactBlockResult = (state, block, res) -> (
+    key := archKey block;
+    cache := state#"ExactBlockCache";
+
+    if not (cache#? key) then (
+        cache#key = hashTable {
+            "blockArchitecture" => block,
+            "dimension" => resultDimension res,
+            "expectedDimension" => resultExpectedDim res,
+            "defect" => resultDefect res,
+            "codim" => resultCodim res,
+            "result" => res
+        };
+    );
+
+    cache#key
+);
+
+------------------------------------------------------------
+-- Generic region certificate from an arbitrary set of cuts
+--
+-- Region data:
+--   anchorHidden   = minimal hidden tuple
+--   freePositions  = 0-based positions in the hidden tuple that may increase
+--
+-- Cuts are full-architecture indices:
+--   0 = input
+--   1..k = hidden coordinates
+--   k+1 = output
+--
+-- Requirement:
+--   internal cuts must occur only at fixed hidden coordinates
+------------------------------------------------------------
+
+regionBlockUpperBoundFromCuts = (state, anchorHidden, freePositions, cuts) -> (
+    d0 := state#"d0";
+    dL := state#"dL";
+    r := state#"exponent";
+
+    k := #anchorHidden;
+    fullArch := architectureFromHidden(d0, dL, anchorHidden);
+
+    -- basic cut validation
+    if first cuts =!= 0 then
+        error "regionBlockUpperBoundFromCuts: cuts must begin with 0";
+    if last cuts =!= k + 1 then
+        error "regionBlockUpperBoundFromCuts: cuts must end with #anchorHidden+1";
+
+    for s from 1 to #cuts - 2 do (
+        idx := cuts#s;
+        hiddenPos := idx - 1;
+        if member(hiddenPos, freePositions) then
+            error "regionBlockUpperBoundFromCuts: internal cuts must be at fixed hidden coordinates";
+    );
+
+    blockInfos := {};
+    exactBlocksUsed := {};  
+    defectiveBlocksUsed := {};  
+    upperSum := 0;
+
+    for s from 0 to #cuts - 2 do (
+        i := cuts#s;
+        j := cuts#(s + 1);
+
+        block := fullArch_(toList(i .. j));
+	exactBlockEntry := null;
+
+        -- determine whether this block contains any free hidden coordinate in its interior
+        hasFreeInterior := false;
+        left := max(1, i);
+        right := min(k, j);
+
+        if left <= right then (
+            for t from left to right do (
+                if member(t - 1, freePositions) then hasFreeInterior = true;
+            );
+        );
+
+        if hasFreeInterior then (
+            ub := ambientUpperBoundArchitecture(block, r);
+            blockType := "ambient-upper-bound";
+        ) else (
+            res := getDimensionCached(state, block);
+            ub = resultDimension res;
+            blockType = "exact-dimension";
+	    exactBlockEntry = recordExactBlockResult(state, block, res);
+	    exactBlocksUsed = join(exactBlocksUsed, {exactBlockEntry});
+
+	    if resultDimension res < resultExpectedDim res then (
+		defectiveBlocksUsed = join(defectiveBlocksUsed, {exactBlockEntry});	    
+		);	    
+	    );
+
+        upperSum = upperSum + ub;
+
+        blockInfos = join(blockInfos, {
+            hashTable {
+                "startIndex" => i,
+                "endIndex" => j,
+                "blockArchitecture" => block,
+                "blockType" => blockType,
+                "blockUpperBound" => ub,
+		"exactBlockEntry" => exactBlockEntry,
+		"defectiveBlocksUsed" => defectiveBlocksUsed
+		}
+        });
+    );
+
+    -- subtract overlap widths at internal cuts
+    overlapCorrection := 0;
+    if #cuts > 2 then (
+        for s from 1 to #cuts - 2 do (
+            overlapCorrection = overlapCorrection + fullArch#(cuts#s);
+        );
+    );
+
+    upperBound := upperSum - overlapCorrection;
+
+    fullRes := getDimensionCached(state, fullArch);
+
+    expectedMin := resultExpectedDim fullRes;
+    actualAtAnchor := resultDimension fullRes;
+    ambientAtAnchor := resultAmbientDim fullRes;
+    defectAtAnchor := resultDefect fullRes;
+    codimAtAnchor := resultCodim fullRes;
+
+    hashTable {
+        "anchorHidden" => anchorHidden,
+        "architecture" => fullArch,
+        "freePositions" => freePositions,
+        "cuts" => cuts,
+        "blockInfos" => blockInfos,
+	"exactBlocksUsed" => exactBlocksUsed,
+	"sumBlockBounds" => upperSum,
+        "overlapCorrection" => overlapCorrection,
+        "upperBound" => upperBound,
+        "expectedDimAtMinimalAnchor" => expectedMin,
+        "actualDimAtMinimalAnchor" => actualAtAnchor,
+        "ambientDimAtMinimalAnchor" => ambientAtAnchor,
+        "defectAtMinimalAnchor" => defectAtAnchor,
+        "codimAtMinimalAnchor" => codimAtAnchor,
+        "certifiedNonfillingRegion" => (upperBound < expectedMin)
+    }
+);
+
+
+------------------------------------------------------------
+-- Print exact blocks used in a certificate
+------------------------------------------------------------
+
+printExactBlocksUsed = info -> (
+    if not (info#? "ExactBlocksUsed") then (
+        << "No exactBlocksUsed field present in this certificate." << endl;
+    ) else (
+        E := info#"ExactBlocksUsed";
+
+        << "Exact block architectures used in certification:" << endl;
+        if #E == 0 then (
+            << "  <none>" << endl;
+        ) else (
+            scan(E, entry -> (
+                << "  " << toString(entry#"blockArchitecture")
+                   << "  -> dim = " << toString(entry#"dimension")
+                   << endl;
+            ));
+        );
+    );
+);
+
+certifyRegionNonfillingByCuts = (state, anchorHidden, freePositions, cuts) -> (
+    info := regionBlockUpperBoundFromCuts(state, anchorHidden, freePositions, cuts);
+    info#"certifiedNonfillingRegion"
+);
+
+printRegionBlockCertificate = info -> (
+    << "Region blockwise certificate" << endl;
+    << "  anchor hidden tuple = " << toString(info#"anchorHidden") << endl;
+    << "  full architecture = " << toString(info#"architecture") << endl;
+    << "  free positions = " << toString(info#"freePositions") << endl;
+    << "  cuts = " << toString(info#"cuts") << endl;
+    << "  sum of block bounds = " << toString(info#"sumBlockBounds") << endl;
+    << "  overlap correction = " << toString(info#"overlapCorrection") << endl;
+    << "  total upper bound = " << toString(info#"upperBound") << endl;
+    << "  expected dim at minimal anchor = " << toString(info#"expectedDimAtMinimalAnchor") << endl;
+    << "  actual dim at minimal anchor = " << toString(info#"actualDimAtMinimalAnchor") << endl;
+    << "  defect at minimal anchor = " << toString(info#"defectAtMinimalAnchor")
+       << ", codim at minimal anchor = " << toString(info#"codimAtMinimalAnchor") << endl;
+    << "  certified nonfilling region? " << toString(info#"certifiedNonfillingRegion") << endl;
+    << endl;
+
+    << "Blocks:" << endl;
+    scan(info#"blockInfos", b -> (
+        << "  [" << toString(b#"startIndex") << "," << toString(b#"endIndex") << "] "
+           << toString(b#"blockArchitecture")
+           << "  type = " << toString(b#"blockType")
+           << "  bound = " << toString(b#"blockUpperBound")
+           << endl;
+    ));
+    << endl;
+    printExactBlocksUsed(info);
+);
 
 
 ------------------------------------------------------------
@@ -879,7 +1179,8 @@ makeFrontierState = (depth, d0, dL, m, n, r) -> (
 
 	"DimensionCache" => new MutableHashTable from {},
 	"nCacheHits" => 0,
-	"nCacheMisses" => 0
+	"nCacheMisses" => 0,
+	"ExactBlockCache" => new MutableHashTable from {}
 	}
 );
 
@@ -2704,3 +3005,64 @@ for infor in cert list inform#
 
  cert#"uncertifiedList"
 computeDimension({2,2,2,2,2,2},2)
+
+
+---
+restart
+load"/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV4.m2"
+
+lowerBound=2
+upperBound =10
+pnnDepth=6
+seedTuples = transpose for i to pnnDepth-2 list {lowerBound,upperBound}
+seedTuples = transpose for i to pnnDepth-2 list {}
+state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
+state1 = initializeFrontierWithArchitectures(state0, seedTuples)
+state2 = runGuidedFrontierSearchResume(state1, 100, 12345)
+
+shellAnchor = {2,2,2,2,10}
+
+infor = testCanonicalCutsFromUpperShellAnchor(state2, shellAnchor);
+printRegionBlockCertificate(infor);
+keys state2
+
+
+fixedPositionsFromFreePositions(5, {4})
+minimalAnchorFromUpperShellAnchor({2,2,2,2,10}, 2, 10)
+
+infor = regionBlockUpperBoundFromCuts(state2, {2,2,2,2,10}, {4}, {0,4,6});
+printRegionBlockCertificate(infor);
+
+
+restart
+load"/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV4.m2"
+lowerBound=2
+upperBound =4
+pnnDepth=6
+seedTuples = transpose for i to pnnDepth-2 list {lowerBound,upperBound}
+seedTuples = transpose for i to pnnDepth-2 list {}
+state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
+state1 = initializeFrontierWithArchitectures(state0, seedTuples)
+state2 = runGuidedFrontierSearchResume(state1, 1000, 12345)
+
+shellAnchors = unresolvedUpperShellTuplesInState(state2);
+#shellAnchors
+anchorInfos = apply(shellAnchors, a -> testCanonicalCutsFromUpperShellAnchor(state2, a));
+certified = select(anchorInfos, info -> info#"certifiedNonfillingRegion");
+uncertified = select(anchorInfos, info -> not info#"certifiedNonfillingRegion");
+#certified
+#uncertified
+peek state2#"ExactBlockCache"
+select(pairs state2, x->(last x)#"defect">0)
+
+(select(pairs state2#"ExactBlockCache", x->(last x)#"defect">0))/first 
+
+stateX = makeFrontierState(6, 2, 1, 2, 10, 2)
+
+class stateX
+peek stateX
+state0#"ExactBlockCache"
+class(state0#"ExactBlockCache")
+---
+
+o26 = {{2,2,2,2,1}}
