@@ -15,6 +15,17 @@ newPackage(
 )
 
 export {
+    "printPatternRegionCertificate",
+    "freePositionsFromAnchor",
+    "boundaryPointToAnchor",
+    "patternBoundaryTableFromUpperShell",    
+    "patternMinimalAnchor",
+    "patternRegionUpperBound",
+    "certifyPatternBoundaryRegion",
+    "certifyAllPatternBoundaryRegions",
+    "printPatternBoundaryRegionCertificationSummary",
+    "isDominatedTuple",
+    "maximalElementsByDominance",
     --
     "certifyAllUpperShellOrthantCellsByBlocks",
     "printUpperShellBlockCertificationSummary",
@@ -68,6 +79,355 @@ export {
     "printFrontierSummary", "printFrontierFillingResults",
     "printGuidedFrontierSummary", "printGuidedFrontierFillingResults"
 }
+
+
+
+
+------------------------------------------------------------
+-- Pretty printer for pattern-region certificates
+------------------------------------------------------------
+
+printPatternRegionCertificate = info -> (
+    << "Pattern-region certificate" << endl;
+    << "  free positions = " << toString(info#"freePositions") << endl;
+    << "  fixed positions = " << toString(info#"fixedPositions") << endl;
+    << "  representative anchor = " << toString(info#"representativeAnchor") << endl;
+    << "  minimal anchor = " << toString(info#"minimalAnchor") << endl;
+    << "  boundary antichain = " << toString(info#"boundary") << endl;
+    << "  cuts = " << toString(info#"cuts") << endl;
+    << "  sum of block bounds = " << toString(info#"sumBlockBounds") << endl;
+    << "  overlap correction = " << toString(info#"overlapCorrection") << endl;
+    << "  total recursive upper bound = " << toString(info#"upperBound") << endl;
+    << "  expected dim at minimal anchor = " << toString(info#"expectedDimAtMinimalAnchor") << endl;
+    << "  actual dim at minimal anchor = " << toString(info#"actualDimAtMinimalAnchor") << endl;
+    << "  defect at minimal anchor = " << toString(info#"defectAtMinimalAnchor")
+       << ", codim at minimal anchor = " << toString(info#"codimAtMinimalAnchor") << endl;
+    << "  certified nonfilling region? "
+       << toString(info#"certifiedNonfillingRegion") << endl;
+    << endl;
+
+    << "Blocks:" << endl;
+    scan(info#"blockInfos", b -> (
+        << "  [" << toString(b#"startIndex") << "," << toString(b#"endIndex") << "] "
+           << toString(b#"representativeBlock")
+           << "  type = " << toString(b#"blockType")
+           << "  bound = " << toString(b#"blockUpperBound")
+           << endl;
+    ));
+);
+
+------------------------------------------------------------
+-- Dominance helpers for antichains in fixed coordinates
+------------------------------------------------------------
+
+isDominatedTuple = (a, b) -> (
+    if #a =!= #b then error "isDominatedTuple: length mismatch";
+    all(toList(0 .. #a - 1), i -> a#i <= b#i)
+);
+
+maximalElementsByDominance = L -> (
+    select(L, a -> not any(L, b -> (not (a === b)) and isDominatedTuple(a, b)))
+);
+
+
+------------------------------------------------------------
+-- Free positions: coordinates equal to n
+------------------------------------------------------------
+
+freePositionsFromAnchor = (anchor, n) -> (
+    select(toList(0 .. #anchor - 1), i -> anchor#i == n)
+);
+
+
+------------------------------------------------------------
+-- Reconstruct full shell anchor from a pattern and fixed-coordinate values
+------------------------------------------------------------
+
+boundaryPointToAnchor = (freePositions, fixedPositions, fixedValues, n, k) -> (
+    if #fixedPositions =!= #fixedValues then
+        error "boundaryPointToAnchor: fixedPositions / fixedValues mismatch";
+
+    anchor := new MutableList from apply(k, i -> n);
+
+    for t from 0 to #fixedPositions - 1 do (
+        anchor#(fixedPositions#t) = fixedValues#t;
+    );
+
+    toList anchor
+);
+
+
+------------------------------------------------------------
+-- Build pattern boundary table from unresolved upper-shell anchors
+--
+-- Each entry is a mutable hash table with keys:
+--   "freePositions"
+--   "fixedPositions"
+--   "boundary"
+--
+-- where "boundary" is the maximal antichain in the fixed coordinates.
+------------------------------------------------------------
+
+patternBoundaryTableFromUpperShell = state -> (
+    anchors := unresolvedUpperShellTuplesInState(state);
+    n := (state#"range")#1;
+
+    table := new MutableHashTable from  {};
+
+    for a in anchors do (
+        F := freePositionsFromAnchor(a, n);
+        k := #a;
+        C := select(toList(0 .. k - 1), i -> not member(i, F));
+        Cvals := apply(C, i -> a#i);
+
+        key := toString(F);
+
+        if table#? key then (
+            entry := table#key;
+            entry#"boundary" = join(entry#"boundary", {Cvals});
+        ) else (
+            entry = new MutableHashTable from {
+                "freePositions" => F,
+                "fixedPositions" => C,
+                "boundary" => {Cvals}
+            };
+            table#key = entry;
+        );
+    );
+
+    -- compress each pattern to the maximal antichain in fixed coordinates
+    for key in keys table do (
+        entry := table#key;
+        entry#"boundary" = maximalElementsByDominance(entry#"boundary");
+    );
+
+    table
+);
+
+
+
+------------------------------------------------------------
+-- Boolean wrapper for one pattern region
+------------------------------------------------------------
+
+certifyPatternBoundaryRegion = (state, entry) -> (
+    info := patternRegionUpperBound(state, entry);
+    info#"certifiedNonfillingRegion"
+);
+
+
+
+
+
+------------------------------------------------------------
+-- Certify all pattern regions from the upper-shell table
+------------------------------------------------------------
+
+certifyAllPatternBoundaryRegions = state -> (
+    table := patternBoundaryTableFromUpperShell(state);
+
+    infos := {};
+    certified := {};
+    uncertified := {};
+
+    for key in keys table do (
+        entry := table#key;
+        info := patternRegionUpperBound(state, entry);
+
+        infos = join(infos, {info});
+
+        if info#"certifiedNonfillingRegion" then
+            certified = join(certified, {info})
+        else
+            uncertified = join(uncertified, {info});
+    );
+
+    hashTable {
+        "numPatterns" => #keys table,
+        "infoList" => infos,
+        "certifiedList" => certified,
+        "uncertifiedList" => uncertified,
+        "numCertified" => #certified,
+        "numUncertified" => #uncertified,
+        "allCertified" => (#uncertified == 0)
+    }
+);
+
+
+
+
+------------------------------------------------------------
+-- Pretty printer for pattern-region certification
+------------------------------------------------------------
+
+printPatternBoundaryRegionCertificationSummary = cert -> (
+    << "Pattern-region certification summary" << endl;
+    << "  pattern regions = " << toString(cert#"numPatterns") << endl;
+    << "  certified nonfilling regions = " << toString(cert#"numCertified") << endl;
+    << "  uncertified regions = " << toString(cert#"numUncertified") << endl;
+    << "  all pattern regions certified? " << toString(cert#"allCertified") << endl;
+    << endl;
+
+    if cert#"numCertified" > 0 then (
+        << "Certified regions:" << endl;
+        scan(cert#"certifiedList", info -> (
+            << "  free positions = " << toString(info#"freePositions")
+               << ", minimal anchor = " << toString(info#"minimalAnchor")
+               << ", upper bound = " << toString(info#"upperBound")
+               << ", expected at minimal anchor = " << toString(info#"expectedDimAtMinimalAnchor")
+               << endl;
+        ));
+        << endl;
+    );
+
+    if cert#"numUncertified" > 0 then (
+        << "Uncertified regions:" << endl;
+        scan(cert#"uncertifiedList", info -> (
+            << "  free positions = " << toString(info#"freePositions")
+               << ", minimal anchor = " << toString(info#"minimalAnchor")
+               << ", upper bound = " << toString(info#"upperBound")
+               << ", expected at minimal anchor = " << toString(info#"expectedDimAtMinimalAnchor")
+               << endl;
+        ));
+    );
+);
+
+
+
+
+------------------------------------------------------------
+-- Uniform recursive upper bound for an entire pattern region
+--
+-- entry is one value from patternBoundaryTableFromUpperShell(state):
+--   entry#"freePositions"
+--   entry#"fixedPositions"
+--   entry#"boundary"
+------------------------------------------------------------
+
+patternRegionUpperBound = (state, entry) -> (
+    d0 := state#"d0";
+    dL := state#"dL";
+    m := (state#"range")#0;
+    n := (state#"range")#1;
+    r := state#"exponent";
+
+    F := entry#"freePositions";
+    C := entry#"fixedPositions";
+    boundary := entry#"boundary";
+
+    k := #F + #C;
+
+    -- representative anchor to determine cuts and block structure
+    repAnchor := boundaryPointToAnchor(F, C, first boundary, n, k);
+    repArch := anchorArchitectureFromHidden(d0, dL, repAnchor);
+    cuts := recursiveCutsFromAnchor(repAnchor, n);
+
+    -- minimal anchor in the whole region
+    minAnchor := patternMinimalAnchor(F, C, m, n, k);
+    minArch := anchorArchitectureFromHidden(d0, dL, minAnchor);
+    minRes := getDimensionCached(state, minArch);
+
+    expectedMin := resultExpectedDim minRes;
+    ambientMin := resultAmbientDim minRes;
+    actualMin := resultDimension minRes;
+    defectMin := resultDefect minRes;
+    codimMin := resultCodim minRes;
+
+    blockInfos := {};
+    upperSum := 0;
+
+    -- for each block between consecutive cuts
+    for s from 0 to #cuts - 2 do (
+        i := cuts#s;
+        j := cuts#(s + 1);
+
+        repBlock := subArchitectureByIndices(repArch, i, j);
+        hasFree := blockContainsFreeHidden(repAnchor, n, i, j);
+
+        if hasFree then (
+            ub := ambientUpperBoundArchitecture(repBlock, r);
+            blockType := "ambient-upper-bound";
+        ) else (
+            -- exact block, but take the MAX over the boundary antichain
+            blockDims := apply(boundary, bC -> (
+                a := boundaryPointToAnchor(F, C, bC, n, k);
+                arch := anchorArchitectureFromHidden(d0, dL, a);
+                block := subArchitectureByIndices(arch, i, j);
+                res := getDimensionCached(state, block);
+                resultDimension res
+            ));
+
+            ub = max blockDims;
+            blockType = "max-exact-dimension-on-boundary";
+        );
+
+        upperSum = upperSum + ub;
+
+        blockInfos = join(blockInfos, {
+            hashTable {
+                "startIndex" => i,
+                "endIndex" => j,
+                "representativeBlock" => repBlock,
+                "blockType" => blockType,
+                "blockUpperBound" => ub
+            }
+        });
+    );
+
+    -- overlap correction: use MIN over the whole region.
+    -- Since fixed coordinates vary downward to m and free coordinates stay at n,
+    -- the minimum value at an internal cut is:
+    --   m if that cut is a fixed coordinate,
+    --   n if that cut is a free coordinate.
+    overlapCorrection := 0;
+    if #cuts > 2 then (
+        for s from 1 to #cuts - 2 do (
+            idx := cuts#s;
+            -- idx is a full architecture hidden index in 1..k
+            hiddenPos := idx - 1;
+
+            if member(hiddenPos, F) then
+                overlapCorrection = overlapCorrection + n
+            else
+                overlapCorrection = overlapCorrection + m;
+        );
+    );
+
+    ubTotal := upperSum - overlapCorrection;
+
+    hashTable {
+        "freePositions" => F,
+        "fixedPositions" => C,
+        "boundary" => boundary,
+        "representativeAnchor" => repAnchor,
+        "minimalAnchor" => minAnchor,
+        "cuts" => cuts,
+        "blockInfos" => blockInfos,
+        "sumBlockBounds" => upperSum,
+        "overlapCorrection" => overlapCorrection,
+        "upperBound" => ubTotal,
+        "expectedDimAtMinimalAnchor" => expectedMin,
+        "ambientDimAtMinimalAnchor" => ambientMin,
+        "actualDimAtMinimalAnchor" => actualMin,
+        "defectAtMinimalAnchor" => defectMin,
+        "codimAtMinimalAnchor" => codimMin,
+        "certifiedNonfillingRegion" => (ubTotal < expectedMin)
+    }
+);
+------------------------------------------------------------
+-- Minimal anchor for a free-pattern region
+------------------------------------------------------------
+
+patternMinimalAnchor = (freePositions, fixedPositions, m, n, k) -> (
+    anchor := new MutableList from apply(k, i -> n);
+
+    for i in fixedPositions do (
+        anchor#i = m;
+    );
+
+    toList anchor
+);
+
 
 
 ------------------------------------------------------------
@@ -271,32 +631,32 @@ blockwiseRecursiveUpperBoundFromAnchor = (state, anchor) -> (
 ------------------------------------------------------------
 
 orthantCellCertifiedNonfillingByBlocks = (state, anchor) -> (
-    info := blockwiseRecursiveUpperBoundFromAnchor(state, anchor);
-    info#"certifiedNonfillingOrthantCell"
+    infor := blockwiseRecursiveUpperBoundFromAnchor(state, anchor);
+    infor#"certifiedNonfillingOrthantCell"
 );
 
 ------------------------------------------------------------
 -- Pretty-printer
 ------------------------------------------------------------
 
-printBlockwiseRecursiveCertificate = info -> (
+printBlockwiseRecursiveCertificate = infor -> (
     << "Blockwise recursive certificate" << endl;
-    << "  anchor hidden tuple = " << toString(info#"anchor") << endl;
-    << "  full architecture = " << toString(info#"architecture") << endl;
-    << "  cuts = " << toString(info#"cuts") << endl;
-    << "  sum of block bounds = " << toString(info#"sumBlockBounds") << endl;
-    << "  overlap correction = " << toString(info#"overlapCorrection") << endl;
-    << "  total recursive upper bound = " << toString(info#"upperBound") << endl;
-    << "  expected dim at anchor = " << toString(info#"expectedDimAtAnchor") << endl;
-    << "  actual dim at anchor = " << toString(info#"actualDimAtAnchor") << endl;
-    << "  defect at anchor = " << toString(info#"defectAtAnchor")
-       << ", codim at anchor = " << toString(info#"codimAtAnchor") << endl;
+    << "  anchor hidden tuple = " << toString(infor#"anchor") << endl;
+    << "  full architecture = " << toString(infor#"architecture") << endl;
+    << "  cuts = " << toString(infor#"cuts") << endl;
+    << "  sum of block bounds = " << toString(infor#"sumBlockBounds") << endl;
+    << "  overlap correction = " << toString(infor#"overlapCorrection") << endl;
+    << "  total recursive upper bound = " << toString(infor#"upperBound") << endl;
+    << "  expected dim at anchor = " << toString(infor#"expectedDimAtAnchor") << endl;
+    << "  actual dim at anchor = " << toString(infor#"actualDimAtAnchor") << endl;
+    << "  defect at anchor = " << toString(infor#"defectAtAnchor")
+       << ", codim at anchor = " << toString(infor#"codimAtAnchor") << endl;
     << "  certified nonfilling for entire orthant cell? "
-       << toString(info#"certifiedNonfillingOrthantCell") << endl;
+       << toString(infor#"certifiedNonfillingOrthantCell") << endl;
     << endl;
 
     << "Blocks:" << endl;
-    scan(info#"blockInfos", b -> (
+    scan(infor#"blockInfos", b -> (
         << "  [" << toString(b#"startIndex") << "," << toString(b#"endIndex") << "] "
            << toString(b#"blockArchitecture")
            << "  type = " << toString(b#"blockType")
@@ -1715,8 +2075,8 @@ certifyAllUpperShellOrthantCellsByBlocks = state -> (
 
     infos := apply(anchors, a -> blockwiseRecursiveUpperBoundFromAnchor(state, a));
 
-    certified := select(infos, info -> info#"certifiedNonfillingOrthantCell");
-    uncertified := select(infos, info -> not info#"certifiedNonfillingOrthantCell");
+    certified := select(infos, infor -> infor#"certifiedNonfillingOrthantCell");
+    uncertified := select(infos, infor -> not infor#"certifiedNonfillingOrthantCell");
 
     hashTable {
         "anchors" => anchors,
@@ -1745,10 +2105,10 @@ printUpperShellBlockCertificationSummary = cert -> (
 
     if cert#"numCertified" > 0 then (
         << "Certified anchors:" << endl;
-        scan(cert#"certifiedList", info -> (
-            << "  " << toString(info#"anchor")
-               << "  with upper bound " << toString(info#"upperBound")
-               << " < expected " << toString(info#"expectedDimAtAnchor")
+        scan(cert#"certifiedList", infor -> (
+            << "  " << toString(infor#"anchor")
+               << "  with upper bound " << toString(infor#"upperBound")
+               << " < expected " << toString(infor#"expectedDimAtAnchor")
                << endl;
         ));
         << endl;
@@ -1756,10 +2116,10 @@ printUpperShellBlockCertificationSummary = cert -> (
 
     if cert#"numUncertified" > 0 then (
         << "Uncertified anchors:" << endl;
-        scan(cert#"uncertifiedList", info -> (
-            << "  " << toString(info#"anchor")
-               << "  with upper bound " << toString(info#"upperBound")
-               << ", expected " << toString(info#"expectedDimAtAnchor")
+        scan(cert#"uncertifiedList", infor -> (
+            << "  " << toString(infor#"anchor")
+               << "  with upper bound " << toString(infor#"upperBound")
+               << ", expected " << toString(infor#"expectedDimAtAnchor")
                << endl;
         ));
     );
@@ -2286,16 +2646,61 @@ printBlockwiseRecursiveCertificate(inf)
 
 
 
+restart
+load"/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV4.m2"
+state0 = makeFrontierState(3,2,1,2,4,2)
+state1 = initializeFrontierWithArchitectures(state0, {{2,2},{3,3}})
+state2 = runGuidedFrontierSearchResume(state1, 10, 12345)
+printResult last first pairs state2#"DimensionCache"
 
 lowerBound=2
-upperBound =7
-pnnDepth=7
+upperBound =10
+pnnDepth=6
 seedTuples = transpose for i to pnnDepth-2 list {lowerBound,upperBound}
 seedTuples = transpose for i to pnnDepth-2 list {}
 state0 = makeFrontierState(pnnDepth, 2, 1, lowerBound, upperBound, 2)
 state1 = initializeFrontierWithArchitectures(state0, seedTuples)
 state2 = runGuidedFrontierSearchResume(state1, 1000, 12345)
 
+upperBound =10
+state2 = runGuidedFrontierSearchResume(state2, 1000, 12345)
+
+
+peek state2
+cert = certifyAllPatternBoundaryRegions(state2);
+printPatternBoundaryRegionCertificationSummary(cert);
+
+
+inf = (cert#"certifiedList")#0;
+printBlockwiseRecursiveCertificate(inf);
+infor#"freePositions"
+infor#"boundary"
+infor#"blockInfos"
+infor#"upperBound"
+infor#"expectedDimAtMinimalAnchor"
+upperBound < expectedDimAtMinimalAnchor
+
+
 unresolvedUpperShellTuplesInState(state2)
 cert = certifyAllUpperShellOrthantCellsByBlocks(state2);
 printUpperShellBlockCertificationSummary(cert);
+
+
+printBlockwiseRecursiveCertificate--- useless
+
+
+info1 = blockwiseRecursiveUpperBoundFromAnchor(state2, {3,5,5});
+printBlockwiseRecursiveCertificate(info1);
+
+
+cert = certifyAllPatternBoundaryRegions(state2)
+netList oo
+peek cert
+
+info2 = (cert#"certifiedList")#0;
+printPatternRegionCertificate(info2);
+
+for infor in cert list inform#
+
+ cert#"uncertifiedList"
+computeDimension({2,2,2,2,2,2},2)
