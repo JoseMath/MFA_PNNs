@@ -23,6 +23,9 @@ newPackage(
 )
 
 export {
+    "printUpperShellBlockCertificationSummary",
+    "certifyAllUpperShellOrthantCellsByBlocks",
+    "blockwiseRecursiveUpperBoundFromAnchor",
     "MinimalFillingSearchState",
     "PrintSummary",
 
@@ -336,8 +339,18 @@ net MinimalFillingSearchState := searchState -> (
         "  guided proposals = " | toString(searchState#"nGuidedProposals") | "\n" |
         "  random proposals = " | toString(searchState#"nRandomProposals") | "\n" |
         "  unresolved count = " | toString(nUnresolved) | "\n" |
-        "  exhausted        = " | toString(searchState#"exhausted")
+        "  exhausted        = " | toString(searchState#"exhausted")| "\n" |
+	"  timing           = " | toString(searchState#"Timing") 
     )
+);
+
+
+
+finishWithTiming = (state,startTime) -> (
+    endTime := currentTime();
+    oldTiming := if state#? "Timing" then state#"Timing" else 0;
+    state#"Timing" = oldTiming + (endTime - startTime);
+    state
 );
 
 
@@ -1816,9 +1829,11 @@ printFrontierFillingResults = out -> (
 );
 
 runFrontierSearch = (depth, d0, dL, m, n, r, B, seed) -> (
+    startTime:=currentTime();
     out := frontierSearchHidden(depth, d0, dL, m, n, r, B, seed);
     printFrontierSummary out;
-    out
+    out;
+    finishWithTiming(out,startTime)
 );
 
 ------------------------------------------------------------
@@ -1942,9 +1957,10 @@ printGuidedFrontierFillingResults = out -> (
 );
 
 runGuidedFrontierSearch = (depth, d0, dL, m, n, r, B, seed) -> (
+    startTime:=currentTime();
     out := frontierSearchHiddenGuided(depth, d0, dL, m, n, r, B, seed);
     printGuidedFrontierSummary out;
-    out
+    finishWithTiming(out,startTime)
 );
 
 ------------------------------------------------------------
@@ -2137,7 +2153,8 @@ makeFrontierState = (depth, d0, dL, m, n, r) -> (
         "DimensionCache" => new MutableHashTable from {},
         "ExactBlockCache" => new MutableHashTable from {},
         "nCacheHits" => 0,
-        "nCacheMisses" => 0
+        "nCacheMisses" => 0,
+	"Timing" => 0
     }
 );
 
@@ -2217,6 +2234,7 @@ chooseGuidedCandidateFilteredWithinCandidates = (Fmin, Nmax, candidateNmax, cand
 ------------------------------------------------------------
 
 runFrontierSearchResume = (state, B, seed) -> (
+    startTime := currentTime();
     depth := state#"depth";
     d0 := state#"d0";
     dL := state#"dL";
@@ -2269,7 +2287,7 @@ runFrontierSearchResume = (state, B, seed) -> (
             state#"nSkippedByNonFilling" = nSkippedByNonFilling;
             state#"nGuidedProposals" = nGuidedProposals;
             state#"nRandomProposals" = nRandomProposals;
-            return state;
+            return finishWithTiming(state,startTime);
         );
 
         state#"unresolvedCount" = #unresolved;
@@ -2336,6 +2354,8 @@ runFrontierSearchResume = (state, B, seed) -> (
 ------------------------------------------------------------
 
 runGuidedFrontierSearchResume = (state, B, seed) -> (
+    startTime := currentTime();
+
     depth := state#"depth";
     d0 := state#"d0";
     dL := state#"dL";
@@ -2388,7 +2408,7 @@ runGuidedFrontierSearchResume = (state, B, seed) -> (
             state#"nSkippedByNonFilling" = nSkippedByNonFilling;
             state#"nGuidedProposals" = nGuidedProposals;
             state#"nRandomProposals" = nRandomProposals;
-            return state;
+            return  finishWithTiming(state,startTime);
         );
 
         state#"unresolvedCount" = #unresolved;
@@ -2459,8 +2479,14 @@ runGuidedFrontierSearchResume = (state, B, seed) -> (
     state#"unresolvedCount" = #unresolvedFinal;
     state#"exhausted" = (#unresolvedFinal == 0);
 
-    state
+
+    endTime := currentTime();
+    oldTiming := if state#? "Timing" then state#"Timing" else 0;
+    state#"Timing" = oldTiming + (endTime - startTime);
+    finishWithTiming(state,startTime)
 );
+
+
 
 ------------------------------------------------------------
 -- Convenience wrapper:
@@ -2578,18 +2604,23 @@ printFrontierSummary state
 
 
 
-numHidden=4
-B=50
-isGuided=false
+numHidden=5
+B=10
+isGuided=false         --timing           = 125
+isGuided=true   
+
 state = runSearchBetweenCandidates(
     2, 1,
     {apply(numHidden, i->2)},
-    {apply(numHidden, i->10)},
+    {apply(numHidden, i->7)},
     2, B, 12345, isGuided, {}
 )
+B=1000
 printFrontierSummary state
 runFrontierSearchResume(state, B, 12334456)
 printFrontierSummary state
+
+
 
 
 peek state
@@ -2601,8 +2632,6 @@ state = initializeCandidateFrontierBounds(
     {{2,2,2,2,12}}
 )
 state = runGuidedFrontierSearchResume(state, 50, 12345)
-printFrontierSummary state
-
 
 
 ---
@@ -2611,3 +2640,15 @@ load "/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitectures
 
 state = makeFrontierState(3, 2, 1, 2, 3, 2)
 
+
+
+restart
+load "/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV7a.m2"
+
+state = makeFrontierState(3, 2, 1, 2, 3, 2);
+state#"Timing"
+
+state = runGuidedFrontierSearchResume(state, 2, 12345);
+
+state#"Timing"
+state
