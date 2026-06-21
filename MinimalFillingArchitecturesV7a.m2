@@ -23,6 +23,7 @@ newPackage(
 )
 
 export {
+    "MinimalFillingSearchState",
     "PrintSummary",
 
     ----------------------------------------------------------------
@@ -287,6 +288,56 @@ architectureStatistics = (networkWidths, networkExponent) -> (
             6 => "codim"
         }
     }
+);
+
+
+
+
+
+
+------------------------------------------------------------
+-- Search-state type for minimal filling architecture search
+------------------------------------------------------------
+
+MinimalFillingSearchState = new Type of MutableHashTable;
+
+------------------------------------------------------------
+-- Display for MinimalFillingSearchState
+------------------------------------------------------------
+
+net MinimalFillingSearchState := searchState -> (
+    nUnresolved :=
+        if searchState#? "unresolvedCount" and searchState#"unresolvedCount" =!= null
+        then searchState#"unresolvedCount"
+        else "unknown";
+
+    candNmax :=
+        if searchState#? "CandidateNmax"
+        then searchState#"CandidateNmax"
+        else "<not set>";
+
+    candFmin :=
+        if searchState#? "CandidateFmin"
+        then searchState#"CandidateFmin"
+        else "<not set>";
+
+    net(
+        "MinimalFillingSearchState\n" |
+        "  depth            = " | toString(searchState#"depth") | "\n" |
+        "  architecture     = {" | toString(searchState#"d0") | ", a1, ..., a"
+            | toString((searchState#"depth") - 1) | ", " | toString(searchState#"dL") | "}\n" |
+        "  range            = " | toString(searchState#"range") | "\n" |
+        "  exponent         = " | toString(searchState#"exponent") | "\n" |
+        "  candidate Nmax   = " | toString(candNmax) | "\n" |
+        "  candidate Fmin   = " | toString(candFmin) | "\n" |
+        "  |FminTuples|     = " | toString(#(searchState#"FminTuples")) | "\n" |
+        "  |NmaxTuples|     = " | toString(#(searchState#"NmaxTuples")) | "\n" |
+        "  evaluated        = " | toString(searchState#"nEvaluated") | "\n" |
+        "  guided proposals = " | toString(searchState#"nGuidedProposals") | "\n" |
+        "  random proposals = " | toString(searchState#"nRandomProposals") | "\n" |
+        "  unresolved count = " | toString(nUnresolved) | "\n" |
+        "  exhausted        = " | toString(searchState#"exhausted")
+    )
 );
 
 
@@ -2057,8 +2108,9 @@ printUpperShellBlockCertificationSummary = cert -> (
 -- Frontier state with candidate bounds
 ------------------------------------------------------------
 
+
 makeFrontierState = (depth, d0, dL, m, n, r) -> (
-    new MutableHashTable from hashTable {
+    new MinimalFillingSearchState from new MutableHashTable from hashTable{
         "depth" => depth,
         "d0" => d0,
         "dL" => dL,
@@ -2520,8 +2572,11 @@ state = runSearchBetweenCandidates(
     2, 50, 12345, isGuided, {}
 )
 printFrontierSummary state
+state
 runFrontierSearchResume(state, B, 12334456)
 printFrontierSummary state
+
+
 
 numHidden=4
 B=50
@@ -2547,3 +2602,12 @@ state = initializeCandidateFrontierBounds(
 )
 state = runGuidedFrontierSearchResume(state, 50, 12345)
 printFrontierSummary state
+
+
+
+---
+restart
+load "/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV7a.m2"
+
+state = makeFrontierState(3, 2, 1, 2, 3, 2)
+
