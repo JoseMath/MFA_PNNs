@@ -23,6 +23,10 @@ newPackage(
 )
 
 export {
+    "impliedFilling",
+    "allHiddenTuplesInBox",
+    "orthantCellCertifiedNonfillingByBlocks",
+    "printBlockwiseRecursiveCertificate",
     "printUpperShellBlockCertificationSummary",
     "certifyAllUpperShellOrthantCellsByBlocks",
     "blockwiseRecursiveUpperBoundFromAnchor",
@@ -292,7 +296,7 @@ architectureStatistics = (networkWidths, networkExponent) -> (
         }
     }
 );
-
+-----helpers
 
 
 
@@ -2607,7 +2611,7 @@ printFrontierSummary state
 numHidden=5
 B=10
 isGuided=false         --timing           = 125
-isGuided=true   
+--isGuided=true   
 
 state = runSearchBetweenCandidates(
     2, 1,
@@ -2619,8 +2623,165 @@ B=1000
 printFrontierSummary state
 runFrontierSearchResume(state, B, 12334456)
 printFrontierSummary state
+state = makeFrontierState(3, 2, 1, 2, 3, 2);
+
+peek state
+NFA = first state#"NmaxTuples"
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+
+anchorCert
+printBlockwiseRecursiveCertificate(anchorCert);
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA)
+
+printBlockwiseRecursiveCertificate(anchorCert)
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+
+all(state#"NmaxTuples",
+    NFA->(
+	print NFA;
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	anchorCert;
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA);
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA)))
+
+-----
 
 
+---TALK
+---BIG COMPUTATION
+numHidden=5
+B=0
+isGuided=false         --timing           = 125
+--isGuided=true   
+
+state = runSearchBetweenCandidates(
+    2, 1,
+    {apply(numHidden, i->2)},
+    {apply(numHidden, i->5)},
+    2, B, 12345, isGuided, {}
+)
+B=100000
+printFrontierSummary state
+runFrontierSearchResume(state, B, 12334456)
+--printFrontierSummary state
+all(state#"NmaxTuples",
+    NFA->(
+	print NFA;
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	anchorCert;
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA);
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA)))
+NFA = first state#"NmaxTuples"
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+
+anchorCert
+printBlockwiseRecursiveCertificate(anchorCert);
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA)
+
+printBlockwiseRecursiveCertificate(anchorCert)
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+
+
+
+---
+---TALK
+---BIG COMPUTATION
+numHidden=6
+maxBound=7
+B=0
+isGuided=false        
+--isGuided=true
+precomputedKnownMFA={{2, 3, 4, 5, 4, 6, 4, 1},{2, 3, 4, 5, 6, 4, 2, 1},
+{2, 3, 3, 4, 5, 6, 3, 1}, {2, 3, 4, 5, 5, 5, 2, 1},
+{2, 3, 3, 5, 6, 4, 4, 1},{2, 3, 3, 5, 7, 4, 2, 1},
+{2, 3, 3, 4, 6, 5, 2, 1},{2, 3, 4, 5, 5, 4, 4, 1},
+{2, 3, 4, 4, 5, 5, 4, 1},{2, 3, 3, 6, 6, 4, 3, 1},
+{2, 3, 3, 5, 5, 5, 4, 1},{2, 3, 4, 6, 5, 4, 3, 1},
+{2, 3, 5, 5, 5, 4, 3, 1}}
+precomputedKnownMFA = for i in precomputedKnownMFA list for j from 1 to #i-2 list i_j
+precomputedKnownMNF = flatten for hid in precomputedKnownMFA list apply(#hid,i->replace(i,hid_i-1,hid))
+
+state = runSearchBetweenCandidates(
+    2, 1,
+    {apply(numHidden, i->2)},
+    {apply(numHidden, i->maxBound)},
+    2, B, 12345, isGuided, precomputedKnownMFA|precomputedKnownMNF
+)
+--- use two primes
+
+scan(10,i->(
+    B=100;
+    printFrontierSummary state;
+    state = runFrontierSearchResume(state, B, random(1,10000));
+    ))
+
+all(state#"NmaxTuples",
+    NFA->(
+	print NFA;
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	anchorCert;
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA);
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA)))
+NFA = first state#"NmaxTuples"
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+
+anchorCert
+printBlockwiseRecursiveCertificate(anchorCert);
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA)
+
+printBlockwiseRecursiveCertificate(anchorCert)
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+
+
+
+
+
+
+state = makeFrontierState(3, 2, 1, 2, 3, 2);
+
+peek state
+NFA = first state#"NmaxTuples"
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+
+anchorCert
+printBlockwiseRecursiveCertificate(anchorCert);
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA)
+
+printBlockwiseRecursiveCertificate(anchorCert)
+orthantCellCertifiedNonfillingByBlocks(state, NFA)
+
+all(state#"NmaxTuples",
+    NFA->(
+	print NFA;
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	anchorCert;
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA);
+	anchorCert = blockwiseRecursiveUpperBoundFromAnchor(state, NFA);
+	printBlockwiseRecursiveCertificate(anchorCert);
+	orthantCellCertifiedNonfillingByBlocks(state, NFA)))
+
+
+{{2, 3, 4, 5, 4, 6, 4, 1},{2, 3, 4, 5, 6, 4, 2, 1},
+{2, 3, 3, 4, 5, 6, 3, 1}, (2, 3, 4, 5, 5, 5, 2, 1},
+{2, 3, 3, 5, 6, 4, 4, 1},(2, 3, 3, 5, 7, 4, 2, 1},
+{2, 3, 3, 4, 6, 5, 2, 1},(2, 3, 4, 5, 5, 4, 4, 1},
+{2, 3, 4, 4, 5, 5, 4, 1},(2, 3, 3, 6, 6, 4, 3, 1},
+{2, 3, 3, 5, 5, 5, 4, 1},(2, 3, 4, 6, 5, 4, 3, 1},
+{2, 3, 5, 5, 5, 4, 3, 1}}
 
 
 peek state
@@ -2652,3 +2813,58 @@ state = runGuidedFrontierSearchResume(state, 2, 12345);
 
 state#"Timing"
 state
+
+
+
+
+restart
+load "/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV7a.m2"
+
+numHidden=6
+maxBound=7
+B=0
+isGuided=false        
+--isGuided=true
+precomputedKnownMFA={{2, 3, 4, 5, 4, 6, 4, 1},{2, 3, 4, 5, 6, 4, 2, 1},
+{2, 3, 3, 4, 5, 6, 3, 1}, {2, 3, 4, 5, 5, 5, 2, 1},
+{2, 3, 3, 5, 6, 4, 4, 1},{2, 3, 3, 5, 7, 4, 2, 1},
+{2, 3, 3, 4, 6, 5, 2, 1},{2, 3, 4, 5, 5, 4, 4, 1},
+{2, 3, 4, 4, 5, 5, 4, 1},{2, 3, 3, 6, 6, 4, 3, 1},
+{2, 3, 3, 5, 5, 5, 4, 1},{2, 3, 4, 6, 5, 4, 3, 1},
+{2, 3, 5, 5, 5, 4, 3, 1}}
+precomputedKnownMFA = for i in precomputedKnownMFA list for j from 1 to #i-2 list i_j
+--precomputedKnownMNF = flatten for hid in precomputedKnownMFA list apply(#hid,i->replace(i,hid_i-1,hid))
+
+
+
+
+immediateUpperNeighborsInBox = (a, n) -> (
+    flatten apply(#a, i ->
+        if a#i < n then {
+            apply(#a, j -> if j == i then a#j + 1 else a#j)
+        } else {}
+    )
+);
+
+isMaximalNonfillingFromFmin = (a, Fmin, n) -> (
+    not impliedFilling(a, Fmin) and
+    all(immediateUpperNeighborsInBox(a, n), b -> impliedFilling(b, Fmin))
+);
+
+maximalNonfillingTuplesFromFmin = (depth, m, n, Fmin) -> (
+    select(
+        allHiddenTuplesInBox(depth, m, n),
+        a -> isMaximalNonfillingFromFmin(a, Fmin, n)
+    )
+);
+
+-- Example: suppose these are ALL minimal fillings in the box
+Nmax = maximalNonfillingTuplesFromFmin(6, 2, maxBound, precomputedKnownMFA);
+Nmax
+
+state = runSearchBetweenCandidates(
+    2, 1,
+    {apply(numHidden, i->2)},
+    {apply(numHidden, i->maxBound)},
+    2, B, 12345, isGuided, precomputedKnownMFA|Nmax
+)
