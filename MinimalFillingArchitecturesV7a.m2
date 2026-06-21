@@ -2239,6 +2239,7 @@ chooseGuidedCandidateFilteredWithinCandidates = (Fmin, Nmax, candidateNmax, cand
 
 runFrontierSearchResume = (state, B, seed) -> (
     startTime := currentTime();
+
     depth := state#"depth";
     d0 := state#"d0";
     dL := state#"dL";
@@ -2263,9 +2264,10 @@ runFrontierSearchResume = (state, B, seed) -> (
     nGuidedProposals := state#"nGuidedProposals";
     nRandomProposals := state#"nRandomProposals";
 
-    << "Resuming random frontier search with candidate bounds:" << endl;
+    << "Resuming frontier search using nextCandidateTuple:" << endl;
     << "  depth = " << toString depth << endl;
-    << "  architecture form = {" << toString d0 << ", a1, ..., a" << toString k << ", " << toString dL << "}" << endl;
+    << "  architecture form = {" << toString d0 << ", a1, ..., a"
+       << toString k << ", " << toString dL << "}" << endl;
     << "  hidden widths in [" << toString m << ", " << toString n << "]" << endl;
     << "  exponent r = " << toString r << endl;
     << "  additional budget B = " << toString B << endl;
@@ -2274,13 +2276,16 @@ runFrontierSearchResume = (state, B, seed) -> (
     if seed =!= null then << "  seed = " << toString seed << endl;
     << endl;
 
-    for t from 1 to B do (
-        unresolved := unresolvedTuplesWithinCandidates(depth, m, n, Fmin, Nmax, candidateNmax, candidateFmin);
+    -- Since we are no longer enumerating the full unresolved set,
+    -- exact unresolvedCount/exhausted are not maintained here.
+    state#"unresolvedCount" = null;
+    state#"exhausted" = null;
 
-        if #unresolved == 0 then (
-            << "Search exhausted: no unresolved hidden tuples remain in the candidate-restricted box region." << endl;
-            state#"exhausted" = true;
-            state#"unresolvedCount" = 0;
+    for t from 1 to B do (
+        a := nextCandidateTuple(state);
+
+        if a === null then (
+            << "No further candidate tuple found by nextCandidateTuple." << endl;
 
             state#"FminTuples" = Fmin;
             state#"NmaxTuples" = Nmax;
@@ -2291,25 +2296,38 @@ runFrontierSearchResume = (state, B, seed) -> (
             state#"nSkippedByNonFilling" = nSkippedByNonFilling;
             state#"nGuidedProposals" = nGuidedProposals;
             state#"nRandomProposals" = nRandomProposals;
-            return finishWithTiming(state,startTime);
+
+            state#"unresolvedCount" = null;
+            state#"exhausted" = null;
+
+            return finishWithTiming(state, startTime);
         );
 
-        state#"unresolvedCount" = #unresolved;
-        a := unresolved#(random(#unresolved));
         nRandomProposals = nRandomProposals + 1;
 
         << "Resume iteration " << toString t << " / " << toString B
            << ": proposed hidden widths " << toString a
-           << " (random from candidate-restricted unresolved set)" << endl;
+           << " (from nextCandidateTuple)" << endl;
 
         if any(Seen, s -> tupleEQ(s, a)) then (
+            nSkippedByFilling = nSkippedByFilling + 0;
+            nSkippedByNonFilling = nSkippedByNonFilling + 0;
             << "  skipped (already seen in earlier search)" << endl;
+            << endl;
+        ) else if impliedFilling(a, Fmin) then (
+            nSkippedByFilling = nSkippedByFilling + 1;
+            << "  skipped (implied filling)" << endl;
+            << endl;
+        ) else if impliedNonFilling(a, Nmax) then (
+            nSkippedByNonFilling = nSkippedByNonFilling + 1;
+            << "  skipped (implied non-filling)" << endl;
             << endl;
         ) else (
             Seen = join(Seen, {a});
 
             arch := architectureFromHidden(d0, dL, a);
             << "  evaluating architecture " << toString arch << endl;
+
             res := getDimensionCached(state, arch);
             nEvaluated = nEvaluated + 1;
 
@@ -2332,6 +2350,16 @@ runFrontierSearchResume = (state, B, seed) -> (
                 << "  classified as non-filling; updated Nmax" << endl;
             );
 
+            state#"FminTuples" = Fmin;
+            state#"NmaxTuples" = Nmax;
+            state#"FminResults" = FminResults;
+            state#"SeenTuples" = Seen;
+            state#"nEvaluated" = nEvaluated;
+            state#"nSkippedByFilling" = nSkippedByFilling;
+            state#"nSkippedByNonFilling" = nSkippedByNonFilling;
+            state#"nGuidedProposals" = nGuidedProposals;
+            state#"nRandomProposals" = nRandomProposals;
+
             << endl;
         );
     );
@@ -2346,13 +2374,11 @@ runFrontierSearchResume = (state, B, seed) -> (
     state#"nGuidedProposals" = nGuidedProposals;
     state#"nRandomProposals" = nRandomProposals;
 
-    unresolvedFinal := unresolvedTuplesWithinCandidates(depth, m, n, Fmin, Nmax, candidateNmax, candidateFmin);
-    state#"unresolvedCount" = #unresolvedFinal;
-    state#"exhausted" = (#unresolvedFinal == 0);
+    state#"unresolvedCount" = null;
+    state#"exhausted" = null;
 
-    state
+    finishWithTiming(state, startTime)
 );
-
 ------------------------------------------------------------
 -- Patched guided frontier resume search restricted to candidates
 ------------------------------------------------------------
