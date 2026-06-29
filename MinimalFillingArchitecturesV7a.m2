@@ -23,6 +23,7 @@ newPackage(
 )
 
 export {
+    "makeNetwork","basisVector","backprop",
     "impliedFilling",
     "allHiddenTuplesInBox",
     "orthantCellCertifiedNonfillingByBlocks",
@@ -2173,6 +2174,126 @@ initializeCandidateFrontierBounds = (state, candidateNmax, candidateFmin) -> (
     state
 );
 
+
+------------------------------------------------------------
+-- Uniform random tuple between two comparable tuples q <= f
+------------------------------------------------------------
+
+randomTupleBetween = (q, f) -> (
+    if #q =!= #f then
+        error "randomTupleBetween: q and f must have the same length";
+    if not tupleLEQ(q, f) then
+        error "randomTupleBetween: require q <= f coordinatewise";
+
+    apply(#q, i -> q#i + random(f#i - q#i + 1))
+);
+
+------------------------------------------------------------
+-- Propose one candidate hidden tuple without exhaustive lists
+--
+-- Returns:
+--   a hidden tuple, or null if no proposal is found
+--
+-- Assumes:
+--   CandidateFmin and CandidateNmax are both nonempty
+------------------------------------------------------------
+
+nextCandidateTuple = state -> (
+    Fmin := state#"FminTuples";
+    Nmax := state#"NmaxTuples";
+    Seen := state#"SeenTuples";
+    candidateNmax := state#"CandidateNmax";
+    candidateFmin := state#"CandidateFmin";
+
+    if #candidateFmin == 0 then return null;
+    if #candidateNmax == 0 then return null;
+
+    --------------------------------------------------------
+    -- Helper: try to get a good tuple between q and f
+    --------------------------------------------------------
+    tryPair := (q, f) -> (
+        if not tupleLEQ(q, f) then return null;
+        if tupleEQ(q, f) then return null;
+
+        -- Try a few random points inside the interval [q,f]
+        for trial from 1 to 20 do (
+            a := randomTupleBetween(q, f);
+
+            if admissibleByCandidateBounds(a, candidateNmax, candidateFmin)
+               and not impliedFilling(a, Fmin)
+               and not impliedNonFilling(a, Nmax)
+               and not any(Seen, s -> tupleEQ(s, a))
+            then return a;
+        );
+
+        null
+    );
+
+    --------------------------------------------------------
+    -- Phase 0: bootstrap between candidateNmax and candidateFmin
+    --------------------------------------------------------
+    for trial from 1 to 50 do (
+        i := random(#candidateFmin);
+        j := random(#candidateNmax);
+
+        q := candidateNmax#j;
+        f := candidateFmin#i;
+
+        a := tryPair(q, f);
+        if a =!= null then return a;
+    );
+
+    --------------------------------------------------------
+    -- Phase 1: main search between proved Nmax and proved Fmin
+    --------------------------------------------------------
+    if #Fmin > 0 and #Nmax > 0 then (
+        for trial from 1 to 50 do (
+            i := random(#Fmin);
+            j := random(#Nmax);
+
+            q := Nmax#j;
+            f := Fmin#i;
+
+            a := tryPair(q, f);
+            if a =!= null then return a;
+        );
+    );
+
+    --------------------------------------------------------
+    -- Phase 2: between proved Fmin and candidateFmin
+    --------------------------------------------------------
+    if #Fmin > 0 then (
+        for trial from 1 to 50 do (
+            i := random(#candidateFmin);
+            j := random(#Fmin);
+
+            q := Fmin#j;
+            f := candidateFmin#i;
+
+            a := tryPair(q, f);
+            if a =!= null then return a;
+        );
+    );
+
+    --------------------------------------------------------
+    -- Phase 3: between candidateNmax and proved Nmax
+    --------------------------------------------------------
+    if #Nmax > 0 then (
+        for trial from 1 to 50 do (
+            i := random(#Nmax);
+            j := random(#candidateNmax);
+
+            q := candidateNmax#j;
+            f := Nmax#i;
+
+            a := tryPair(q, f);
+            if a =!= null then return a;
+        );
+    );
+
+    null
+);
+
 ------------------------------------------------------------
 -- Candidate-bound admissibility
 ------------------------------------------------------------
@@ -2844,6 +2965,7 @@ state
 
 
 restart
+--BIIGGGG
 load "/Users/joserodriguez/Documents/GitHub/MFA_PNNs/MinimalFillingArchitecturesV7a.m2"
 
 numHidden=6
@@ -2885,7 +3007,7 @@ maximalNonfillingTuplesFromFmin = (depth, m, n, Fmin) -> (
 );
 
 -- Example: suppose these are ALL minimal fillings in the box
-Nmax = maximalNonfillingTuplesFromFmin(6, 2, maxBound, precomputedKnownMFA);
+Nmax = maximalNonfillingTuplesFromFmin(7, 2, maxBound, precomputedKnownMFA);
 Nmax
 
 state = runSearchBetweenCandidates(
@@ -2894,3 +3016,28 @@ state = runSearchBetweenCandidates(
     {apply(numHidden, i->maxBound)},
     2, B, 12345, isGuided, precomputedKnownMFA|Nmax
 )
+state = runGuidedFrontierSearchResume(state, 5, 12345)
+
+a = first state#"NmaxTuples"
+apply(state#"NmaxTuples",
+    a->(
+	certData = testCanonicalCutsFromUpperShellAnchor(state, a);
+	certData#"certifiedNonfillingRegion";
+	printCanonicalCutSummary(certData);
+	printRegionBlockCertificate(certData);
+	)
+    )
+
+apply(pairs state#"ExactBlockCache", (k,v)->(
+    if v#"expectedDimension"=!=v#"dimension" then k
+	))
+
+
+
+
+
+stats = architectureStatistics({2,1,1}, 3)
+stats = architectureStatistics({2,2,1}, 3)
+stats = architectureStatistics({2,2,2,2,2,1}, 2)
+stats = architectureStatistics({2,3,1}, 3)
+
